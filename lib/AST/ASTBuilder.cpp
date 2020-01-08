@@ -510,6 +510,124 @@ struct DebugLocationSynthesizer {
   }
 };
 
+/// Collect the hoisted and scope level declarations in the corresponding AST
+/// lists.
+class DeclCollector {
+ public:
+  DeclCollector(Context &ctx)
+      : ctx_(ctx), kwVar_(ctx.getIdentifier("var").getUnderlyingPointer()) {}
+
+  bool shouldVisit(Node *node) {
+    return true;
+  }
+  void enter(Node *node) {}
+  void leave(Node *node) {}
+
+  void enter(FunctionLikeNode *node) {
+    savedFuncScopes_.push_back(curFunctionScope);
+    curFunctionScope = nullptr;
+  }
+  void leave(FunctionLikeNode *node) {
+    curFunctionScope = savedFuncScopes_.back();
+    savedFuncScopes_.pop_back();
+  }
+  void enter(ProgramNode *node) {
+    enter(static_cast<FunctionLikeNode *>(node));
+    pushScope(node);
+  }
+  void leave(ProgramNode *node) {
+    popScope(node);
+    leave(static_cast<FunctionLikeNode *>(node));
+  }
+  void enter(FunctionDeclarationNode *node) {
+    addToDecls(node);
+    enter(static_cast<FunctionLikeNode *>(node));
+  }
+
+  void enter(BlockStatementNode *node) {
+    pushScope(node);
+  }
+  void leave(BlockStatementNode *node) {
+    popScope(node);
+  }
+
+  void enter(ForStatementNode *node) {
+    pushScope(node);
+  }
+  void leave(ForStatementNode *node) {
+    popScope(node);
+  }
+  void enter(ForInStatementNode *node) {
+    pushScope(node);
+  }
+  void leave(ForInStatementNode *node) {
+    popScope(node);
+  }
+  void enter(ForOfStatementNode *node) {
+    pushScope(node);
+  }
+  void leave(ForOfStatementNode *node) {
+    popScope(node);
+  }
+  void enter(SwitchStatementNode *node) {
+    // Note that this is technically premature since the expression is not
+    // in the scope, however it cannot add declarations (yet?).
+    pushScope(node);
+  }
+  void leave(SwitchStatementNode *node) {
+    popScope(node);
+  }
+
+  void enter(VariableDeclarationNode *node) {
+    addToDecls(node);
+  }
+  void enter(ClassDeclarationNode *node) {
+    addToDecls(node);
+  }
+  void enter(ImportDeclarationNode *node) {
+    addToDecls(node);
+  }
+
+ private:
+  /// Push the scope list of the node to the scope stack.
+  void pushScope(ScopeDecorationBase *n) {
+    scopeStack_.push_back(n);
+    if (!curFunctionScope)
+      curFunctionScope = n;
+  }
+
+  /// Assert that the scope list of the node is at the top of the stack and
+  /// pop it.
+  void popScope(ScopeDecorationBase *n) {
+    assert(
+        scopeStack_.back() == n && "node is not at the top of the scope stack");
+    if (curFunctionScope == n)
+      curFunctionScope = nullptr;
+    scopeStack_.pop_back();
+  }
+
+  /// Add the specified declaration to scope decl list.
+  void addToDecls(Node *node) {
+    scopeStack_.back()->decls.push_back(ctx_, node);
+  }
+
+ private:
+  /// The AST context.
+  Context &ctx_;
+  /// The "var" identifier.
+  UniqueString *const kwVar_;
+
+  /// The current function scope. Whenever it is null, the next scope becomes
+  /// the current one.
+  ScopeDecorationBase *curFunctionScope = nullptr;
+
+  /// Stack of lexical scopes.
+  std::vector<ScopeDecorationBase *> scopeStack_{};
+  /// The current function scope is saved here before we cleared when we enter
+  /// a new function.
+  std::vector<ScopeDecorationBase *> savedFuncScopes_{};
+};
+
 } // namespace
 
 llvm::Optional<Node *> buildAST(
@@ -519,6 +637,8 @@ llvm::Optional<Node *> buildAST(
   auto result = ASTBuilder(context, jsSource).build(node);
   DebugLocationSynthesizer synthesizer;
   ESTreeVisit(synthesizer, result.getValue());
+  DeclCollector declCollector(context);
+  ESTreeVisit(declCollector, result.getValue());
   return result;
 }
 
