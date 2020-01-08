@@ -86,7 +86,12 @@ class SemContext {
 
 /// Perform semantic validation of the entire AST, starting from the specified
 /// root, which should be ProgramNode.
-bool validateAST(Context &astContext, SemContext &semCtx, ESTree::NodePtr root);
+/// \param global if true, validate the node in global scope.
+bool validateAST(
+    Context &astContext,
+    SemContext &semCtx,
+    ESTree::ProgramNode *root,
+    bool global);
 
 /// Perform semantic validation of an individual function in the given context
 /// \param function must be a function node
@@ -95,7 +100,7 @@ bool validateFunctionAST(
     Context &astContext,
     SemContext &semCtx,
     ESTree::NodePtr function,
-    bool strict);
+    ESTree::Strictness strict);
 
 } // namespace sem
 } // namespace hermes

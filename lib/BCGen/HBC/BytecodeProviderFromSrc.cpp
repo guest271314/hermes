@@ -175,7 +175,9 @@ BCProviderFromSrc::createBCProviderFromSrc(
   sem::SemContext semCtx{};
   parser::JSParser parser(*context, fileBufId, parserMode);
   auto parsed = parser.parse();
-  if (!parsed || !hermes::sem::validateAST(*context, semCtx, *parsed)) {
+  if (!parsed ||
+      !hermes::sem::validateAST(
+          *context, semCtx, *parsed, scopeChain.functions.empty())) {
     return {nullptr, outputManager.getErrorString()};
   }
   // If we are using lazy parse mode, we should have already detected the 'use

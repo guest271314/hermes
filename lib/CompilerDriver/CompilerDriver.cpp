@@ -770,7 +770,7 @@ ESTree::NodePtr parseJS(
   }
   if (!parsedJs)
     return nullptr;
-  ESTree::NodePtr parsedAST = parsedJs.getValue();
+  ESTree::Node *parsedAST = parsedJs.getValue();
 
   if (cl::StaticBuiltins == cl::StaticBuiltinSetting::AutoDetect) {
     context->setStaticBuiltinOptimization(useStaticBuiltinDetected);
@@ -792,8 +792,15 @@ ESTree::NodePtr parseJS(
         cl::DumpSourceLocation ? &context->getSourceErrorManager() : nullptr);
   }
 
-  if (!hermes::sem::validateAST(*context, semCtx, parsedAST)) {
-    return nullptr;
+  if (auto *PN = dyn_cast<ESTree::ProgramNode>(parsedAST)) {
+    if (!hermes::sem::validateAST(*context, semCtx, PN, true)) {
+      return nullptr;
+    }
+  } else {
+    if (!hermes::sem::validateFunctionAST(
+            *context, semCtx, parsedAST, ESTree::Strictness::NonStrictMode)) {
+      return nullptr;
+    }
   }
 
   if (cl::DumpTarget == DumpTransformedAST) {

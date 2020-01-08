@@ -25,7 +25,7 @@ TEST(ValidatorTest, TestBadAssignmentLValue) {
   auto parsed = parser.parse();
   ASSERT_TRUE(parsed.hasValue());
 
-  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed));
+  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed, true));
   EXPECT_EQ(1, diag.getErrCount());
 }
 
@@ -38,7 +38,7 @@ TEST(ValidatorTest, TestBadForLValue) {
   auto parsed = parser.parse();
   ASSERT_TRUE(parsed.hasValue());
 
-  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed));
+  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed, true));
   EXPECT_EQ(1, diag.getErrCount());
 }
 
@@ -51,7 +51,7 @@ TEST(ValidatorTest, UnnamedBreakLabelTest) {
   auto parsed = parser.parse();
   ASSERT_TRUE(parsed.hasValue());
 
-  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed));
+  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed, true));
   ASSERT_EQ(2, diag.getErrCountClear());
 }
 
@@ -64,7 +64,7 @@ TEST(ValidatorTest, UnnamedContinueLabelTest) {
   auto parsed = parser.parse();
   ASSERT_TRUE(parsed.hasValue());
 
-  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed));
+  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed, true));
   ASSERT_EQ(1, diag.getErrCountClear());
 }
 
@@ -77,7 +77,7 @@ TEST(ValidatorTest, ContinueWithBlockLabelTest) {
   auto parsed = parser.parse();
   ASSERT_TRUE(parsed.hasValue());
 
-  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed));
+  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed, true));
   ASSERT_EQ(1, diag.getErrCountClear());
 }
 
@@ -93,7 +93,7 @@ TEST(ValidatorTest, ChainedNamedLabelsTest) {
   auto parsed = parser.parse();
   ASSERT_TRUE(parsed.hasValue());
 
-  ASSERT_TRUE(validateAST(ctx, semCtx, *parsed));
+  ASSERT_TRUE(validateAST(ctx, semCtx, *parsed, true));
 }
 
 /// Duplicated label in the scope of the previous one.
@@ -108,7 +108,7 @@ TEST(ValidatorTest, DuplicateNamedLabelTest) {
   auto parsed = parser.parse();
   ASSERT_TRUE(parsed.hasValue());
 
-  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed));
+  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed, true));
   ASSERT_EQ(2, diag.getErrCountClear());
 }
 
@@ -120,7 +120,7 @@ TEST(ValidatorTest, CorrectDuplicateNamedLabelTest) {
       ctx, "label1: { break label1; } label1: for(;;) break label1;");
   auto parsed = parser.parse();
   ASSERT_TRUE(parsed.hasValue());
-  ASSERT_TRUE(validateAST(ctx, semCtx, *parsed));
+  ASSERT_TRUE(validateAST(ctx, semCtx, *parsed, true));
 }
 
 TEST(ValidatorTest, ScopeNamedLabelTest) {
@@ -131,7 +131,7 @@ TEST(ValidatorTest, ScopeNamedLabelTest) {
   auto parsed = parser.parse();
   ASSERT_TRUE(parsed.hasValue());
 
-  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed));
+  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed, true));
   ASSERT_EQ(1, diag.getErrCountClear());
 }
 
@@ -144,7 +144,7 @@ TEST(ValidatorTest, NamedBreakLabelTest) {
   auto parsed = parser.parse();
   ASSERT_TRUE(parsed.hasValue());
 
-  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed));
+  ASSERT_FALSE(validateAST(ctx, semCtx, *parsed, true));
   ASSERT_EQ(2, diag.getErrCountClear());
 }
 } // anonymous namespace

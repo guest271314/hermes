@@ -44,13 +44,16 @@ std::pair<std::string, std::string> genSplitCode(
                      bool wrapCJSModule = false) -> hermes::ESTree::NodePtr {
     ::hermes::parser::JSParser jsParser(*context, std::move(fileBuf));
     auto parsedJs = jsParser.parse();
-    hermes::ESTree::NodePtr parsedAST = parsedJs.getValue();
+    hermes::ESTree::ProgramNode *parsedAST = parsedJs.getValue();
     if (wrapCJSModule) {
-      parsedAST = hermes::wrapCJSModule(
-          context, cast<hermes::ESTree::ProgramNode>(parsedAST));
+      auto *wrapped = hermes::wrapCJSModule(context, parsedAST);
+      validateFunctionAST(
+          *context, semCtx, wrapped, ESTree::Strictness::NonStrictMode);
+      return wrapped;
+    } else {
+      validateAST(*context, semCtx, parsedAST, true);
+      return parsedAST;
     }
-    validateAST(*context, semCtx, parsedAST);
-    return parsedAST;
   };
 
   ::hermes::DeclarationFileListTy declFileList;

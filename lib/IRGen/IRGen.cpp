@@ -65,7 +65,11 @@ std::pair<Function *, Function *> generateLazyFunctionIR(
   // In case of error, generate a function that just throws a SyntaxError.
   if (!parsed ||
       !sem::validateFunctionAST(
-          context, semCtx, *parsed, lazyData->strictMode)) {
+          context,
+          semCtx,
+          *parsed,
+          lazyData->strictMode ? ESTree::Strictness::StrictMode
+                               : ESTree::Strictness::NonStrictMode)) {
     LLVM_DEBUG(
         llvm::dbgs() << "Lazy AST parsing/validation failed with error: "
                      << diagHandler.getErrorString());

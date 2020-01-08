@@ -36,7 +36,7 @@ TEST(IRScopeChainTest, BasicScopeChainTest) {
   auto parsed = jsParser.parse();
   ASSERT_TRUE(parsed);
   sem::SemContext semCtx{};
-  auto validated = validateAST(*context, semCtx, *parsed);
+  auto validated = validateAST(*context, semCtx, *parsed, true);
   ASSERT_TRUE(validated);
 
   auto *ast = parsed.getValue();

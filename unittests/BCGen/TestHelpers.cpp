@@ -36,7 +36,7 @@ std::vector<uint8_t> hermes::bytecodeForSource(
   auto parsed = jsParser.parse();
   assert(parsed.hasValue() && "Failed to parse source");
   sem::SemContext semCtx{};
-  auto validated = validateAST(*context, semCtx, *parsed);
+  auto validated = validateAST(*context, semCtx, *parsed, true);
   (void)validated;
   assert(validated && "Failed to validate source");
   auto *ast = parsed.getValue();

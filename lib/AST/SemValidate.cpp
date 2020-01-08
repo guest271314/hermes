@@ -16,7 +16,11 @@ using namespace hermes::ESTree;
 namespace hermes {
 namespace sem {
 
-bool validateAST(Context &astContext, SemContext &semCtx, Node *root) {
+bool validateAST(
+    Context &astContext,
+    SemContext &semCtx,
+    ProgramNode *root,
+    bool global) {
   PerfSection validation("Validating JavaScript function AST");
   // Validate the entire AST.
   SemanticValidator validator{astContext, semCtx};
@@ -27,10 +31,11 @@ bool validateFunctionAST(
     Context &astContext,
     SemContext &semCtx,
     Node *function,
-    bool strict) {
+    ESTree::Strictness strict) {
   PerfSection validation("Validating JavaScript function AST: Deep");
   SemanticValidator validator{astContext, semCtx};
-  return validator.doFunction(function, strict);
+  return validator.doFunction(
+      function, strict == ESTree::Strictness::StrictMode);
 }
 
 } // namespace sem
