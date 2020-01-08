@@ -9,6 +9,7 @@
 
 #include "ESTreeIRGen.h"
 
+#include "hermes/AST/ESTreeJSONDumper.h"
 #include "hermes/Parser/JSParser.h"
 #include "hermes/Support/SimpleDiagHandler.h"
 
@@ -62,14 +63,37 @@ std::pair<Function *, Function *> generateLazyFunctionIR(
   auto parsed = parser.parseLazyFunction(
       (ESTree::NodeKind)lazyData->nodeKind, lazyData->span.Start);
 
+  if (!diagHandler.haveErrors() &&
+      context.getLazyDumpTarget() == OutputFormatKind::DumpAST) {
+    llvm::outs() << "**** Lazy dump ****\n\n";
+    hermes::dumpESTreeJSON(
+        llvm::outs(),
+        *parsed,
+        true /* pretty */,
+        &context.getSourceErrorManager());
+  }
+
+  if (!diagHandler.haveErrors()) {
+    sem::validateFunctionAST(
+        context,
+        semCtx,
+        *parsed,
+        lazyData->strictMode ? ESTree::Strictness::StrictMode
+                             : ESTree::Strictness::NonStrictMode);
+  }
+
+  if (!diagHandler.haveErrors() &&
+      context.getLazyDumpTarget() == OutputFormatKind::DumpTransformedAST) {
+    llvm::outs() << "**** Lazy dump ****\n\n";
+    hermes::dumpESTreeJSON(
+        llvm::outs(),
+        *parsed,
+        true /* pretty */,
+        &context.getSourceErrorManager());
+  }
+
   // In case of error, generate a function that just throws a SyntaxError.
-  if (!parsed ||
-      !sem::validateFunctionAST(
-          context,
-          semCtx,
-          *parsed,
-          lazyData->strictMode ? ESTree::Strictness::StrictMode
-                               : ESTree::Strictness::NonStrictMode)) {
+  if (diagHandler.haveErrors()) {
     LLVM_DEBUG(
         llvm::dbgs() << "Lazy AST parsing/validation failed with error: "
                      << diagHandler.getErrorString());

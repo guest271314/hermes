@@ -12,6 +12,7 @@
 #include "hermes/Support/Allocator.h"
 #include "hermes/Support/SourceErrorManager.h"
 #include "hermes/Support/StringTable.h"
+#include "hermes/Utils/Options.h"
 
 namespace hermes {
 
@@ -147,6 +148,9 @@ class Context {
   /// If true, every function will be compiled lazily when invoked for the
   /// first time.
   bool lazyCompilation_{false};
+
+  /// What information to dump during lazy compilation.
+  OutputFormatKind lazyDumpTarget_{OutputFormatKind::None};
 
   /// If true, wrap each file in the CommonJS module wrapper function,
   /// and use that for requiring modules.
@@ -284,6 +288,14 @@ class Context {
 
   void setLazyCompilation(bool lazyCompilation) {
     lazyCompilation_ = lazyCompilation;
+  }
+
+  OutputFormatKind getLazyDumpTarget() const {
+    return lazyDumpTarget_;
+  }
+
+  void setLazyDumpTarget(OutputFormatKind kind) {
+    lazyDumpTarget_ = kind;
   }
 
   void setStaticBuiltinOptimization(bool staticBuiltins) {

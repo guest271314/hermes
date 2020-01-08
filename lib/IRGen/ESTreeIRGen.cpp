@@ -351,6 +351,12 @@ std::pair<Function *, Function *> ESTreeIRGen::doLazyFunction(
       "lazy compilation not supported for arrow functions");
 
   auto *func = genES5Function(lazyData->originalName, parentVar, node);
+
+  if (lazyData->context->getLazyDumpTarget() == OutputFormatKind::DumpIR) {
+    llvm::outs() << "**** Lazy dump ****\n\n";
+    Mod->dump();
+  }
+
   addLexicalDebugInfo(func, topLevel, lexicalScopeChain);
   return {func, topLevel};
 }

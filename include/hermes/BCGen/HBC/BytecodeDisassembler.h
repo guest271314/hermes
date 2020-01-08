@@ -315,7 +315,7 @@ class BytecodeDisassembler {
 
  public:
   explicit BytecodeDisassembler(std::shared_ptr<hbc::BCProvider> bcProvider)
-      : bcProvider_(bcProvider) {}
+      : bcProvider_(std::move(bcProvider)) {}
 
   /// Set options for disassembly output.
   void setOptions(DisassemblyOptions options) {

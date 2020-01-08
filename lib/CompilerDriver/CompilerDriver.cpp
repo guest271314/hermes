@@ -278,6 +278,9 @@ static opt<bool> LazyCompilation(
     desc("Compile source lazily when executing (HBC only)"),
     cat(CompilerCategory));
 
+/// This value is copied from DumpTarget if LazyCompilation is set.
+static OutputFormatKind LazyDumpTarget = OutputFormatKind::None;
+
 /// The following flags are exported so it may be used by the VM driver as well.
 opt<bool> BasicBlockProfiling(
     "basic-block-profiling",
@@ -842,6 +845,11 @@ bool validateFlags() {
     }
   };
 
+  if (cl::LazyCompilation) {
+    cl::LazyDumpTarget = cl::DumpTarget;
+    cl::DumpTarget = OutputFormatKind::None;
+  }
+
   // Validate strict vs non strict mode.
   if (cl::NonStrictMode && cl::StrictMode) {
     err("Error! Cannot use both -strict and -non-strict");
@@ -870,6 +878,9 @@ bool validateFlags() {
     }
     if (cl::CommonJS) {
       err("-lazy doesn't support CommonJS modules");
+    }
+    if (cl::LazyDumpTarget == OutputFormatKind::EmitBundle) {
+      err("-lazy can't emit a bundle");
     }
   }
 
@@ -1583,6 +1594,7 @@ CompileResult processSourceFiles(
 
   // Enable lazy compilation if requested.
   context->setLazyCompilation(cl::LazyCompilation);
+  context->setLazyDumpTarget(cl::LazyDumpTarget);
 
   // Create the source map if requested.
   llvm::Optional<SourceMapGenerator> sourceMapGen{};
