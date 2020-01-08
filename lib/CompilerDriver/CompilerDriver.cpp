@@ -443,13 +443,6 @@ static opt<bool> ReusePropCache(
 static CLFlag
     Inline('f', "inline", true, "inlining of functions", CompilerCategory);
 
-static CLFlag Outline(
-    'f',
-    "outline",
-    false,
-    "IR outlining to reduce code size",
-    CompilerCategory);
-
 static CLFlag StripFunctionNames(
     'f',
     "strip-function-names",
@@ -463,41 +456,6 @@ static CLFlag EnableTDZ(
     true,
     "Enable TDZ checks for let/const",
     CompilerCategory);
-
-static opt<bool> OutliningPlaceNearCaller(
-    "outline-near-caller",
-    init(OutliningSettings{}.placeNearCaller),
-    desc("Place outlined functions near callers instead of at the end"),
-    Hidden,
-    cat(CompilerCategory));
-
-static opt<unsigned> OutliningMaxRounds(
-    "outline-max-rounds",
-    init(OutliningSettings{}.maxRounds),
-    desc("Maximum number of outlining rounds to perform"),
-    Hidden,
-    cat(CompilerCategory));
-
-static opt<unsigned> OutliningMinLength(
-    "outline-min-length",
-    init(OutliningSettings{}.minLength),
-    desc("Minimum number of instructions to consider outlining"),
-    Hidden,
-    cat(CompilerCategory));
-
-static opt<unsigned> OutliningMinParameters(
-    "outline-min-params",
-    init(OutliningSettings{}.minParameters),
-    desc("Minimum number of parameters in outlined functions"),
-    Hidden,
-    cat(CompilerCategory));
-
-static opt<unsigned> OutliningMaxParameters(
-    "outline-max-params",
-    init(OutliningSettings{}.maxParameters),
-    desc("Maximum number of parameters in outlined functions"),
-    Hidden,
-    cat(CompilerCategory));
 
 static CLFlag DirectEvalWarning(
     'W',
@@ -967,15 +925,6 @@ std::shared_ptr<Context> createContext(
 
   optimizationOpts.inlining = cl::OptimizationLevel != cl::OptLevel::O0 &&
       cl::BytecodeFormat == cl::BytecodeFormatKind::HBC && cl::Inline;
-  optimizationOpts.outlining =
-      cl::OptimizationLevel != cl::OptLevel::O0 && cl::Outline;
-
-  optimizationOpts.outliningSettings.placeNearCaller =
-      cl::OutliningPlaceNearCaller;
-  optimizationOpts.outliningSettings.maxRounds = cl::OutliningMaxRounds;
-  optimizationOpts.outliningSettings.minLength = cl::OutliningMinLength;
-  optimizationOpts.outliningSettings.minParameters = cl::OutliningMinParameters;
-  optimizationOpts.outliningSettings.maxParameters = cl::OutliningMaxParameters;
 
   optimizationOpts.reusePropCache = cl::ReusePropCache;
 
