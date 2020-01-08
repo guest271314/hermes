@@ -78,7 +78,8 @@ std::pair<std::string, std::string> genSplitCode(
   genModule(0, llvm::MemoryBuffer::getMemBufferCopy(mainCode, "main.js"));
   genModule(1, llvm::MemoryBuffer::getMemBufferCopy(segmentCode, "foo.js"));
 
-  hermes::BytecodeGenerationOptions genOpts{hermes::EmitBundle};
+  hermes::BytecodeGenerationOptions genOpts{
+      hermes::OutputFormatKind::EmitBundle};
   hermes::SHA1 sourceHash;
 
   auto genBC = [&](hermes::Context::SegmentRange range) {

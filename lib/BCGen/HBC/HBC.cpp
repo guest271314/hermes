@@ -165,7 +165,7 @@ std::unique_ptr<BytecodeModule> hbc::generateBytecodeModule(
   PerfSection perf("Bytecode Generation");
   lowerIR(M, options);
 
-  if (options.format == DumpLIR)
+  if (options.format == OutputFormatKind::DumpLIR)
     M->dump();
 
   BytecodeModuleGenerator BMGen(options);
@@ -266,7 +266,7 @@ std::unique_ptr<BytecodeModule> hbc::generateBytecodeModule(
       llvm::SmallVector<BasicBlock *, 16> order(PO.rbegin(), PO.rend());
       RA.allocate(order);
 
-      if (options.format == DumpRA) {
+      if (options.format == OutputFormatKind::DumpRA) {
         RA.dump();
       }
 
@@ -286,10 +286,10 @@ std::unique_ptr<BytecodeModule> hbc::generateBytecodeModule(
       }
       PM.run(&F);
 
-      if (options.format == DumpLRA)
+      if (options.format == OutputFormatKind::DumpLRA)
         RA.dump();
 
-      if (options.format == DumpPostRA)
+      if (options.format == OutputFormatKind::DumpPostRA)
         F.dump();
 
       funcGen =

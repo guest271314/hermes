@@ -191,30 +191,48 @@ static list<std::string> CustomOptimize(
 
 static opt<OutputFormatKind> DumpTarget(
     desc("Choose output:"),
-    init(None),
+    init(OutputFormatKind::None),
     values(
-        clEnumValN(None, "no-dump", "Parse only, no output (default)"),
-        clEnumValN(DumpAST, "dump-ast", "Dump the AST as text in JSON"),
         clEnumValN(
-            DumpTransformedAST,
+            OutputFormatKind::None,
+            "no-dump",
+            "Parse only, no output (default)"),
+        clEnumValN(
+            OutputFormatKind::DumpAST,
+            "dump-ast",
+            "Dump the AST as text in JSON"),
+        clEnumValN(
+            OutputFormatKind::DumpTransformedAST,
             "dump-transformed-ast",
             "Dump the transformed AST as text after validation"),
 #ifndef NDEBUG
-        clEnumValN(ViewCFG, "view-cfg", "View the CFG."),
+        clEnumValN(OutputFormatKind::ViewCFG, "view-cfg", "View the CFG."),
 #endif
-        clEnumValN(DumpIR, "dump-ir", "Dump the IR as text"),
-        clEnumValN(DumpLIR, "dump-lir", "Dump the Lowered IR as text"),
-        clEnumValN(DumpRA, "dump-ra", "Dump the register-allocated IR as text"),
+        clEnumValN(OutputFormatKind::DumpIR, "dump-ir", "Dump the IR as text"),
         clEnumValN(
-            DumpLRA,
+            OutputFormatKind::DumpLIR,
+            "dump-lir",
+            "Dump the Lowered IR as text"),
+        clEnumValN(
+            OutputFormatKind::DumpRA,
+            "dump-ra",
+            "Dump the register-allocated IR as text"),
+        clEnumValN(
+            OutputFormatKind::DumpLRA,
             "dump-lra",
             "Dump register-allocated Lowered IR as text"),
         clEnumValN(
-            DumpPostRA,
+            OutputFormatKind::DumpPostRA,
             "dump-postra",
             "Dump the Lowered IR after register allocation"),
-        clEnumValN(DumpBytecode, "dump-bytecode", "Dump bytecode as text"),
-        clEnumValN(EmitBundle, "emit-binary", "Emit compiled binary")),
+        clEnumValN(
+            OutputFormatKind::DumpBytecode,
+            "dump-bytecode",
+            "Dump bytecode as text"),
+        clEnumValN(
+            OutputFormatKind::EmitBundle,
+            "emit-binary",
+            "Emit compiled binary")),
     cat(CompilerCategory));
 
 static opt<bool> PrettyJSON(
@@ -762,7 +780,7 @@ ESTree::NodePtr parseJS(
     }
   }
 
-  if (cl::DumpTarget == DumpAST) {
+  if (cl::DumpTarget == OutputFormatKind::DumpAST) {
     hermes::dumpESTreeJSON(
         llvm::outs(),
         parsedAST,
@@ -781,7 +799,7 @@ ESTree::NodePtr parseJS(
     }
   }
 
-  if (cl::DumpTarget == DumpTransformedAST) {
+  if (cl::DumpTarget == OutputFormatKind::DumpTransformedAST) {
     hermes::dumpESTreeJSON(
         llvm::outs(),
         parsedAST,
@@ -830,8 +848,8 @@ bool validateFlags() {
   }
 
   // Validate bytecode output file.
-  if (cl::DumpTarget == EmitBundle && cl::BytecodeOutputFilename.empty() &&
-      oscompat::isatty(STDOUT_FILENO)) {
+  if (cl::DumpTarget == OutputFormatKind::EmitBundle &&
+      cl::BytecodeOutputFilename.empty() && oscompat::isatty(STDOUT_FILENO)) {
     // To skip this check and trash the terminal, use -out /dev/stdout.
     err("Refusing to write binary bundle to terminal.\n"
         "Specify output file with -out filename.");
@@ -871,15 +889,15 @@ bool validateFlags() {
       err("-output-source-map requires -out to be set");
     if (cl::BytecodeFormat != cl::BytecodeFormatKind::HBC)
       err("-output-source-map requires HBC target");
-    if (cl::DumpTarget != EmitBundle)
+    if (cl::DumpTarget != OutputFormatKind::EmitBundle)
       err("-output-source-map only works with -emit-binary");
   }
 
   // Validate bytecode dumping flags.
-  if (cl::BytecodeMode && cl::DumpTarget != None) {
+  if (cl::BytecodeMode && cl::DumpTarget != OutputFormatKind::None) {
     if (cl::BytecodeFormat != cl::BytecodeFormatKind::HBC)
       err("Only Hermes bytecode files may be dumped");
-    if (cl::DumpTarget != DumpBytecode)
+    if (cl::DumpTarget != OutputFormatKind::DumpBytecode)
       err("You can only dump bytecode for HBC bytecode file.");
   }
   return !errored;
@@ -1418,9 +1436,9 @@ CompileResult processBytecodeFile(std::unique_ptr<llvm::MemoryBuffer> fileBuf) {
     return InputFileError;
   }
   bytecode = std::move(ret.first);
-  if (cl::DumpTarget != None) {
+  if (cl::DumpTarget != OutputFormatKind::None) {
     assert(
-        cl::DumpTarget == DumpBytecode &&
+        cl::DumpTarget == OutputFormatKind::DumpBytecode &&
         "validateFlags() should enforce bytecode files "
         "may only have a dump target of bytecode");
     return disassembleBytecode(std::move(bytecode));
@@ -1486,7 +1504,7 @@ CompileResult generateBytecodeForSerialization(
         sourceMapGenOrNull,
         std::move(baseBCProvider));
 
-    if (cl::DumpTarget == DumpBytecode) {
+    if (cl::DumpTarget == OutputFormatKind::DumpBytecode) {
       disassembleBytecode(hbc::BCProviderFromSrc::createBCProviderFromSrc(
           std::move(bytecodeModule)));
     }
@@ -1658,13 +1676,13 @@ CompileResult processSourceFiles(
     assert(!failedVerification && "Module verification failed!");
   }
 
-  if (cl::DumpTarget == DumpIR) {
+  if (cl::DumpTarget == OutputFormatKind::DumpIR) {
     M.dump();
     return Success;
   }
 
 #ifndef NDEBUG
-  if (cl::DumpTarget == ViewCFG) {
+  if (cl::DumpTarget == OutputFormatKind::ViewCFG) {
     M.viewGraph();
     return Success;
   }
@@ -1686,7 +1704,7 @@ CompileResult processSourceFiles(
   genOptions.stripFunctionNames = cl::StripFunctionNames;
 
   // If the dump target is None, return bytecode in an executable form.
-  if (cl::DumpTarget == None) {
+  if (cl::DumpTarget == OutputFormatKind::None) {
     assert(
         !sourceMapGen &&
         "validateFlags() should enforce no source map output for execution");

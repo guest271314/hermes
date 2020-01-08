@@ -34,7 +34,7 @@ bool compileJS(
 
   llvm::raw_string_ostream bcstream(bytecode);
 
-  BytecodeGenerationOptions opts(::hermes::EmitBundle);
+  BytecodeGenerationOptions opts(::hermes::OutputFormatKind::EmitBundle);
   opts.optimizationEnabled = optimize;
 
   hbc::BytecodeSerializer BS{bcstream, opts};

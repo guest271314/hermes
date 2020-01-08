@@ -10,7 +10,7 @@
 
 namespace hermes {
 
-enum OutputFormatKind {
+enum class OutputFormatKind {
   None = 0,
   DumpAST,
   DumpTransformedAST,
@@ -27,7 +27,7 @@ enum OutputFormatKind {
 /// Options controlling the type of output to generate.
 struct BytecodeGenerationOptions {
   /// The format of the output.
-  OutputFormatKind format = None;
+  OutputFormatKind format = OutputFormatKind::None;
 
   /// Whether optimizations are enabled.
   bool optimizationEnabled = false;
@@ -58,7 +58,7 @@ struct BytecodeGenerationOptions {
       : format(format) {}
 
   static BytecodeGenerationOptions defaults() {
-    return {None};
+    return {OutputFormatKind::None};
   }
 };
 
