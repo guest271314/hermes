@@ -246,7 +246,7 @@ void ESTreeIRGen::doIt() {
       Program,
       Builder.createBasicBlock(topLevelFunction),
       InitES5CaptureState::Yes,
-      DoEmitParameters::Yes);
+      DoEmitLocals::Yes);
 
   Value *retVal;
   {

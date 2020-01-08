@@ -44,11 +44,10 @@ function *useResult() {
   var x = yield 1;
 }
 //CHECK-LABEL:function useResult()
-//CHECK-NEXT:frame = [x]
+//CHECK-NEXT:frame = []
 //CHECK-NEXT:%BB0:
-//CHECK-NEXT:  %0 = StoreFrameInst undefined : undefined, [x]
-//CHECK-NEXT:  %1 = CreateGeneratorInst %?anon_1_useResult()
-//CHECK-NEXT:  %2 = ReturnInst %1 : object
+//CHECK-NEXT:  %0 = CreateGeneratorInst %?anon_1_useResult()
+//CHECK-NEXT:  %1 = ReturnInst %0 : object
 //CHECK-NEXT:function_end
 
 //CHECK-LABEL:function ?anon_1_useResult()
@@ -83,11 +82,10 @@ function *loop(x) {
   }
 }
 //CHECK-LABEL:function loop()
-//CHECK-NEXT:frame = [i]
+//CHECK-NEXT:frame = []
 //CHECK-NEXT:%BB0:
-//CHECK-NEXT:  %0 = StoreFrameInst undefined : undefined, [i]
-//CHECK-NEXT:  %1 = CreateGeneratorInst %?anon_2_loop()
-//CHECK-NEXT:  %2 = ReturnInst %1 : object
+//CHECK-NEXT:  %0 = CreateGeneratorInst %?anon_2_loop()
+//CHECK-NEXT:  %1 = ReturnInst %0 : object
 //CHECK-NEXT:function_end
 
 //CHECK-LABEL:function ?anon_2_loop(x)

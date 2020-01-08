@@ -15,12 +15,10 @@ function *loop(x) {
   return 'DONE LOOPING';
 }
 
-// CHECK-LABEL: NCFunction<loop>(2 params, 4 registers, 1 symbols):
+// CHECK-LABEL: NCFunction<loop>(2 params, 3 registers, 0 symbols):
 // CHECK-NEXT:     CreateEnvironment r0
-// CHECK-NEXT:     LoadConstUndefined r1
-// CHECK-NEXT:     StoreNPToEnvironment r0, 0, r1
-// CHECK-NEXT:     CreateGenerator   r2, r0, 2
-// CHECK-NEXT:     Ret               r2
+// CHECK-NEXT:     CreateGenerator   r1, r0, 2
+// CHECK-NEXT:     Ret               r1
 
 // CHECK-LABEL: Function<?anon_0_loop>(2 params, 15 registers, 2 symbols):
 // CHECK-NEXT: Offset in debug table: src 0xa, vars 0x0

@@ -141,7 +141,7 @@ Value *ESTreeIRGen::genArrowFunctionExpression(
         AF,
         Builder.createBasicBlock(newFunc),
         InitES5CaptureState::No,
-        DoEmitParameters::Yes);
+        DoEmitLocals::Yes);
 
     genBlockStatement(cast<ESTree::BlockStatementNode>(AF->_body));
     emitFunctionEpilogue(Builder.getLiteralUndefined());
@@ -229,7 +229,7 @@ Function *ESTreeIRGen::genES5Function(
           functionNode,
           prologueBB,
           InitES5CaptureState::Yes,
-          DoEmitParameters::Yes);
+          DoEmitLocals::Yes);
     } else {
       // If there are non-simple params, then we must add a new yield/resume.
       // The `.next()` call will occur once in the outer function, before
@@ -244,7 +244,7 @@ Function *ESTreeIRGen::genES5Function(
           functionNode,
           prologueBB,
           InitES5CaptureState::Yes,
-          DoEmitParameters::Yes);
+          DoEmitLocals::Yes);
       Builder.createSaveAndYieldInst(
           Builder.getLiteralUndefined(), entryPointBB);
 
@@ -260,7 +260,7 @@ Function *ESTreeIRGen::genES5Function(
         functionNode,
         Builder.createBasicBlock(newFunction),
         InitES5CaptureState::Yes,
-        DoEmitParameters::Yes);
+        DoEmitLocals::Yes);
   }
 
   genBlockStatement(cast<ESTree::BlockStatementNode>(body));
@@ -296,7 +296,7 @@ Function *ESTreeIRGen::genGeneratorFunction(
         functionNode,
         Builder.createBasicBlock(outerFn),
         InitES5CaptureState::Yes,
-        DoEmitParameters::No);
+        DoEmitLocals::No);
 
     // Create a generator function, which will store the arguments.
     auto *gen = Builder.createCreateGeneratorInst(innerFn);
@@ -355,7 +355,7 @@ void ESTreeIRGen::emitFunctionPrologue(
     ESTree::FunctionLikeNode *funcNode,
     BasicBlock *entry,
     InitES5CaptureState doInitES5CaptureState,
-    DoEmitParameters doEmitParameters) {
+    DoEmitLocals doEmitLocals) {
   auto *newFunc = curFunction()->function;
   auto *semInfo = curFunction()->getSemInfo();
 
@@ -368,45 +368,48 @@ void ESTreeIRGen::emitFunctionPrologue(
   // unused.
   curFunction()->createArgumentsInst = Builder.createCreateArgumentsInst();
 
-  // Create variable declarations for each of the hoisted variables and
-  // functions. Initialize only the variables to undefined.
-  for (auto *decl : semInfo->getFunctionScope()->decls) {
-    // For now, to avoid changing many tests, delay declaring parameters till
-    // after everything else.
-    if (decl->kind == Decl::Kind::Parameter)
-      continue;
+  if (doEmitLocals == DoEmitLocals::Yes) {
+    // Create variable declarations for each of the hoisted variables and
+    // functions. Initialize only the variables to undefined.
+    for (auto *decl : semInfo->getFunctionScope()->decls) {
+      // For now, to avoid changing many tests, delay declaring parameters till
+      // after everything else.
+      if (decl->kind == Decl::Kind::Parameter)
+        continue;
 
-    // For now, to avoid changing many tests, delay declaring functions till
-    // after variables.
-    if (decl->functionInScope)
-      continue;
+      // For now, to avoid changing many tests, delay declaring functions till
+      // after variables.
+      if (decl->functionInScope)
+        continue;
 
-    // Don't define undeclared global properties, they will be auto-declared
-    // when the variable is looked up.
-    // But why not pre-declare them? Because they may have been defined by the
-    // ScopedChain, in which case the validator doesn't know about them, but
-    // IRGen has them in the name table. This is a temporary situation.
-    if (decl->kind == Decl::Kind::UndeclaredGlobalProperty)
-      continue;
+      // Don't define undeclared global properties, they will be auto-declared
+      // when the variable is looked up.
+      // But why not pre-declare them? Because they may have been defined by the
+      // ScopedChain, in which case the validator doesn't know about them, but
+      // IRGen has them in the name table. This is a temporary situation.
+      if (decl->kind == Decl::Kind::UndeclaredGlobalProperty)
+        continue;
 
-    auto res = declareVariableOrGlobalProperty(newFunc, decl->kind, decl->name);
-    // If this is not a frame variable or it was already declared, skip.
-    auto *var = dyn_cast<Variable>(res.first);
-    if (!var || !res.second)
-      continue;
+      auto res =
+          declareVariableOrGlobalProperty(newFunc, decl->kind, decl->name);
+      // If this is not a frame variable or it was already declared, skip.
+      auto *var = dyn_cast<Variable>(res.first);
+      if (!var || !res.second)
+        continue;
 
-    // Otherwise, initialize it to undefined.
-    Builder.createStoreFrameInst(Builder.getLiteralUndefined(), var);
-    if (var->getRelatedVariable()) {
-      Builder.createStoreFrameInst(
-          Builder.getLiteralUndefined(), var->getRelatedVariable());
+      // Otherwise, initialize it to undefined.
+      Builder.createStoreFrameInst(Builder.getLiteralUndefined(), var);
+      if (var->getRelatedVariable()) {
+        Builder.createStoreFrameInst(
+            Builder.getLiteralUndefined(), var->getRelatedVariable());
+      }
     }
-  }
-  // This loop is a temporary hack to declare functions after variables.
-  for (auto *decl : semInfo->getFunctionScope()->decls) {
-    if (!decl->functionInScope)
-      continue;
-    declareVariableOrGlobalProperty(newFunc, decl->kind, decl->name);
+    // This loop is a temporary hack to declare functions after variables.
+    for (auto *decl : semInfo->getFunctionScope()->decls) {
+      if (!decl->functionInScope)
+        continue;
+      declareVariableOrGlobalProperty(newFunc, decl->kind, decl->name);
+    }
   }
 
   // Always create the "this" parameter. It needs to be created before we
@@ -418,23 +421,23 @@ void ESTreeIRGen::emitFunctionPrologue(
 
   // Construct the parameter list. Create function parameters and register
   // them in the scope.
-  if (doEmitParameters == DoEmitParameters::Yes) {
+  if (doEmitLocals == DoEmitLocals::Yes) {
     emitParameters(funcNode);
+
+    // Generate the code for import declarations before generating the rest of
+    // the body.
+    for (auto importDecl : semInfo->imports) {
+      genImportDeclaration(importDecl);
+    }
+
+    // Generate and initialize the code for the hoisted function declarations
+    // before generating the rest of the body.
+    for (auto funcDecl : semInfo->getFunctionScope()->hoistedFunctions) {
+      genFunctionDeclaration(funcDecl);
+    }
   } else {
     newFunc->setExpectedParamCountIncludingThis(
         countExpectedArgumentsIncludingThis(funcNode));
-  }
-
-  // Generate the code for import declarations before generating the rest of the
-  // body.
-  for (auto importDecl : semInfo->imports) {
-    genImportDeclaration(importDecl);
-  }
-
-  // Generate and initialize the code for the hoisted function declarations
-  // before generating the rest of the body.
-  for (auto funcDecl : semInfo->getFunctionScope()->hoistedFunctions) {
-    genFunctionDeclaration(funcDecl);
   }
 }
 

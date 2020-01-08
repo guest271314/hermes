@@ -718,7 +718,9 @@ class ESTreeIRGen {
 
   enum class InitES5CaptureState { No, Yes };
 
-  enum class DoEmitParameters { No, Yes };
+  /// A flag indicating whether \c emitFunctionPrologue() should emit any local
+  /// variables, including variables, function declarations, etc.
+  enum class DoEmitLocals { No, Yes };
 
   /// Emit the function prologue for the current function, consisting of the
   /// following things:
@@ -733,14 +735,15 @@ class ESTreeIRGen {
   /// \param entry the unpopulated entry block for the function
   /// \param doInitES5CaptureState initialize the capture state for ES5
   ///     functions.
-  /// \param doEmitParameters run code to initialize parameters in the function.
+  /// \param doEmitLocals run code to initialize locals in the function,
+  ///     including parameters, function declarations, etc.
   ///     When "No", only set the .length of the resultant function.
   ///     Used for the outer function of generator functions, e.g.
   void emitFunctionPrologue(
       ESTree::FunctionLikeNode *funcNode,
       BasicBlock *entry,
       InitES5CaptureState doInitES5CaptureState,
-      DoEmitParameters doEmitParameters);
+      DoEmitLocals doEmitLocals);
 
   /// Emit the loading and initialization of parameters in the function
   /// prologue.
