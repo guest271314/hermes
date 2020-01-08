@@ -136,6 +136,9 @@ class SemanticValidator {
   /// Perform the validation on an individual function.
   bool doFunction(Node *function, bool strict);
 
+  /// Perform validation of a lazy function.
+  bool doLazyFunction(Node *function, bool strict);
+
   /// Handle the default case for all nodes which we ignore, but we still want
   /// to visit their children.
   void visit(Node *node) {

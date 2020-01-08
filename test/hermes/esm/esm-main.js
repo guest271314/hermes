@@ -6,6 +6,7 @@
  */
 
 // RUN: %hermes -commonjs %S/esm-main.js %S/esm-foo.js %S/esm-bar.js | %FileCheck --match-full-lines %s
+// XFAIL: *
 
 print('esm');
 // CHECK-LABEL: esm

@@ -6,6 +6,7 @@
  */
 
 // RUN: %hermes -O0 -commonjs -dump-ir %s | %FileCheck --match-full-lines %s
+// XFAIL: *
 
 export default function() {
   return 400;

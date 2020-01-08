@@ -51,7 +51,7 @@ std::pair<Function *, Function *> generateLazyFunctionIR(
   SimpleDiagHandlerRAII diagHandler{context.getSourceErrorManager()};
 
   AllocationScope alloc(context.getAllocator());
-  sem::SemContext semCtx{context, DeclarationFileListTy{}};
+  sem::SemContext semCtx{context, lazyData->parentScope->semData};
   hermes::parser::JSParser parser(
       context, lazyData->bufferId, parser::LazyParse);
 
@@ -74,9 +74,10 @@ std::pair<Function *, Function *> generateLazyFunctionIR(
   }
 
   if (!diagHandler.haveErrors()) {
-    sem::validateFunctionAST(
+    sem::validateLazyFunctionAST(
         context,
         semCtx,
+        lazyData->parentScope->lexicalScope,
         *parsed,
         lazyData->strictMode ? ESTree::Strictness::StrictMode
                              : ESTree::Strictness::NonStrictMode);

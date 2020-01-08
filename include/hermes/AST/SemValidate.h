@@ -350,6 +350,16 @@ bool validateFunctionAST(
     ESTree::NodePtr function,
     ESTree::Strictness strict);
 
+/// Perform semantic validation of an individual function in the given context
+/// \param function must be a function node
+/// \param strict specifies parent strictness.
+bool validateLazyFunctionAST(
+    Context &astContext,
+    SemContext &semCtx,
+    LexicalScope *lexicalScope,
+    ESTree::NodePtr function,
+    ESTree::Strictness strict);
+
 } // namespace sem
 } // namespace hermes
 

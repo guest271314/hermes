@@ -78,6 +78,25 @@ bool SemanticValidator::doFunction(Node *function, bool strict) {
   return sm_.getErrorCount() == initialErrorCount_;
 }
 
+bool SemanticValidator::doLazyFunction(Node *function, bool strict) {
+  // Create a wrapper context since a function always assumes there is an
+  // existing context.
+  FunctionContext wrapperContext(
+      this, strict, nullptr, semData_.getCurFunction());
+
+  if (auto *FE = dyn_cast<FunctionExpressionNode>(function)) {
+    sm_.error(function->getStartLoc(), "Unsupported lazy function");
+  } else if (auto *funcDecl = dyn_cast<FunctionDeclarationNode>(function)) {
+    visitFunction(funcDecl, funcDecl->_params, funcDecl->_body);
+  } else if (auto *P = dyn_cast<PropertyNode>(function)) {
+    sm_.error(function->getStartLoc(), "Unsupported lazy function");
+  } else {
+    sm_.error(function->getStartLoc(), "Unsupported lazy function");
+  }
+
+  return sm_.getErrorCount() == initialErrorCount_;
+}
+
 void SemanticValidator::visitProgram(ProgramNode *node, bool global) {
   assert(
       semData_.getCurFunction() == semData_.getGlobalFunction() &&

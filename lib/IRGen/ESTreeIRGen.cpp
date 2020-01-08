@@ -84,6 +84,18 @@ bool isConstantExpr(ESTree::Node *node) {
   }
 }
 
+/// Determine the number of scopes in the lexical chain.
+static int getDepth(const SerializedScope *chain) {
+  int depth = 0;
+  if (chain) {
+    for (const auto *sc = chain->lexicalScope; sc != nullptr;
+         sc = sc->parentScope) {
+      ++depth;
+    }
+  }
+  return depth;
+}
+
 //===----------------------------------------------------------------------===//
 // LReference
 
@@ -150,6 +162,40 @@ GlobalObjectProperty *LReference::castAsGlobalObjectProperty() const {
 }
 
 //===----------------------------------------------------------------------===//
+// DeclTable
+
+void DeclTable::insertNew(sem::Decl *decl, Value *val) {
+  assert(decl && "null sem::Decl");
+  auto res = map_.try_emplace(decl, val);
+  assert(res.second && "sem::decl was already registered");
+  if (!res.second)
+    return;
+  if (level_)
+    level_->keys_.push_back(decl);
+}
+
+Value *DeclTable::lookupExisting(const sem::Decl *key) const {
+  auto *res = map_.lookup(key);
+  assert(res && "decl key doesn't exist");
+  return res;
+}
+
+Value *DeclTable::lookupOptional(const sem::Decl *key) const {
+  return map_.lookup(key);
+}
+
+DeclTable::Level::Level(DeclTable &table)
+    : table_(table), prevLevel_(table.level_) {
+  table.level_ = this;
+}
+
+DeclTable::Level::~Level() {
+  for (auto *key : keys_)
+    table_.map_.erase(key);
+  table_.level_ = prevLevel_;
+}
+
+//===----------------------------------------------------------------------===//
 // ESTreeIRGen
 
 ESTreeIRGen::ESTreeIRGen(
@@ -161,7 +207,7 @@ ESTreeIRGen::ESTreeIRGen(
       Mod(M),
       Builder(Mod),
       Root(root),
-      lexicalScopeChain(resolveScopeIdentifiers(scopeChain)),
+      lexicalScopeChain_(resolveScopeIdentifiers(scopeChain)),
       identEval_(Builder.createIdentifier("eval")),
       identLet_(Builder.createIdentifier("let")),
       identDefaultExport_(Builder.createIdentifier("?default")) {}
@@ -188,7 +234,7 @@ void ESTreeIRGen::doIt() {
   // chain. It is only initialized if we have a lexical scope chain.
   llvm::Optional<FunctionContext> wrapperFunctionContext{};
 
-  if (!lexicalScopeChain) {
+  if (!lexicalScopeChain_) {
     topLevelFunction = Builder.createTopLevelFunction(
         ESTree::isStrict(Program->strictness), Program->getSourceRange());
   } else {
@@ -209,7 +255,7 @@ void ESTreeIRGen::doIt() {
     genDummyFunction(wrapperFunction);
 
     // Restore the previously saved parent scopes.
-    materializeScopesInChain(wrapperFunction, lexicalScopeChain, -1);
+    materializeScopesInChain(wrapperFunction, lexicalScopeChain_.get(), -1);
 
     // Finally create the function which will actually be executed.
     topLevelFunction = Builder.createFunction(
@@ -238,7 +284,7 @@ void ESTreeIRGen::doIt() {
 
   // Now declare all externally supplied global properties, but only if we don't
   // have a lexical scope chain.
-  if (!lexicalScopeChain) {
+  if (!lexicalScopeChain_) {
     declareGlobals();
   }
 
@@ -281,7 +327,7 @@ void ESTreeIRGen::doCJSModule(
   // Now declare all externally supplied global properties, but only if we don't
   // have a lexical scope chain.
   assert(
-      !lexicalScopeChain &&
+      !lexicalScopeChain_ &&
       "Lexical scope chain not supported for CJS modules");
   declareGlobals();
 
@@ -290,16 +336,6 @@ void ESTreeIRGen::doCJSModule(
 
   Builder.getModule()->addCJSModule(
       id, Builder.createIdentifier(filename), newFunc);
-}
-
-static int getDepth(const std::shared_ptr<SerializedScope> chain) {
-  int depth = 0;
-  const SerializedScope *current = chain.get();
-  while (current) {
-    depth += 1;
-    current = current->parentScope.get();
-  }
-  return depth;
 }
 
 std::pair<Function *, Function *> ESTreeIRGen::doLazyFunction(
@@ -325,9 +361,11 @@ std::pair<Function *, Function *> ESTreeIRGen::doLazyFunction(
   // Instruction selection determines the delta between the ExternalScope
   // and the dummy function chain, so we add the ExternalScopes with
   // positive depth.
-  lexicalScopeChain = lazyData->parentScope;
+  lexicalScopeChain_ = lazyData->parentScope;
   materializeScopesInChain(
-      topLevel, lexicalScopeChain, getDepth(lexicalScopeChain) - 1);
+      topLevel,
+      lexicalScopeChain_.get(),
+      getDepth(lexicalScopeChain_.get()) - 1);
 
   // If lazyData->closureAlias is specified, we must create an alias binding
   // between originalName (which must be valid) and the variable identified by
@@ -339,11 +377,13 @@ std::pair<Function *, Function *> ESTreeIRGen::doLazyFunction(
         lazyData->originalName != lazyData->closureAlias &&
         "Original name must be different from the alias");
 
+#ifdef QQQ
     // NOTE: the closureAlias target must exist and must be a Variable.
     parentVar = cast<Variable>(nameTable_.lookup(lazyData->closureAlias));
 
     // Re-create the alias.
     nameTable_.insert(lazyData->originalName, parentVar);
+#endif
   }
 
   assert(
@@ -357,73 +397,58 @@ std::pair<Function *, Function *> ESTreeIRGen::doLazyFunction(
     Mod->dump();
   }
 
-  addLexicalDebugInfo(func, topLevel, lexicalScopeChain);
+  addLexicalDebugInfo(func, topLevel, lexicalScopeChain_.get());
   return {func, topLevel};
 }
 
-std::pair<Value *, bool> ESTreeIRGen::declareVariableOrGlobalProperty(
-    Function *inFunc,
-    Decl::Kind declKind,
-    Identifier name) {
-  Value *found = nameTable_.lookup(name);
+GlobalObjectProperty *ESTreeIRGen::declareGlobalProperty(sem::Decl *decl) {
+  assert(
+      Decl::isKindGlobal(decl->kind) &&
+      "global property must have a global kind");
+  // Avoid redefining global properties.
+  auto *prop =
+      dyn_cast_or_null<GlobalObjectProperty>(declTable_.lookupOptional(decl));
+  if (prop)
+    return prop;
 
-  // If the variable is already declared in this scope, do not create a
-  // second instance.
-  if (found) {
-    if (auto *var = dyn_cast<Variable>(found)) {
-      if (var->getParent()->getFunction() == inFunc)
-        return {found, false};
-    } else {
-      assert(
-          isa<GlobalObjectProperty>(found) &&
-          "Invalid value found in name table");
-      if (inFunc->isGlobalScope())
-        return {found, false};
-    }
-  }
-
-  // Create a property if global scope, variable otherwise.
-  Value *res;
-  if (Decl::isKindGlobal(declKind)) {
-    res = Builder.createGlobalObjectProperty(
-        name, declKind != Decl::Kind::UndeclaredGlobalProperty);
-    // Register the variable in the scoped hash table.
-    nameTable_.insert(name, res);
-  } else {
-    res = declareNewLocalVariable(inFunc, declKind, name);
-  }
+  LLVM_DEBUG(
+      llvm::dbgs() << "declaring ambient global property " << decl->name << " "
+                   << decl->name.getUnderlyingPointer() << "\n");
 
   // Register the variable in the scoped hash table.
-  nameTable_.insert(name, res);
-  return {res, true};
+  prop = Builder.createGlobalObjectProperty(
+      decl->name, decl->kind != Decl::Kind::UndeclaredGlobalProperty);
+  declTable_.insertNew(decl, prop);
+  return prop;
 }
 
-Variable *ESTreeIRGen::declareNewLocalVariable(
-    hermes::Function *inFunc,
-    hermes::sem::Decl::Kind declKind,
-    hermes::Identifier name) {
-  assert(
-      !Decl::isKindGlobal(declKind) &&
-      "cannot declare a global property as local variable");
+Value *ESTreeIRGen::createVariableOrGlobalProperty(
+    VariableScope *targetScope,
+    sem::Decl *decl) {
+  // Create a property if global scope, variable otherwise.
+  if (Decl::isKindGlobal(decl->kind)) {
+    return Builder.createGlobalObjectProperty(
+        decl->name, decl->kind != Decl::Kind::UndeclaredGlobalProperty);
+  }
 
   Variable::DeclKind vdc;
-  if (declKind == Decl::Kind::Let)
+  if (decl->kind == Decl::Kind::Let)
     vdc = Variable::DeclKind::Let;
-  else if (declKind == Decl::Kind::Const)
+  else if (decl->kind == Decl::Kind::Const)
     vdc = Variable::DeclKind::Const;
-  else if (declKind == Decl::Kind::FunctionExprName)
+  else if (decl->kind == Decl::Kind::FunctionExprName)
     vdc = Variable::DeclKind::FunctionExprName;
   else {
     vdc = Variable::DeclKind::Var;
   }
 
-  auto *var = Builder.createVariable(inFunc->getFunctionScope(), vdc, name);
+  auto *var = Builder.createVariable(targetScope, vdc, decl->name);
 
   // For "let" and "const" create the related TDZ flag.
   if (Variable::declKindNeedsTDZ(vdc) &&
       Mod->getContext().getCodeGenerationSettings().enableTDZ) {
     llvm::SmallString<32> strBuf{"tdz$"};
-    strBuf.append(name.str());
+    strBuf.append(decl->name.str());
 
     auto *related = Builder.createVariable(
         var->getParent(),
@@ -433,75 +458,90 @@ Variable *ESTreeIRGen::declareNewLocalVariable(
     related->setRelatedVariable(var);
   }
 
-  // Register the variable in the scoped hash table.
-  nameTable_.insert(name, var);
-
   return var;
 }
 
-void ESTreeIRGen::declareLexicalScope(LexicalScope *lexicalScope) {
-  for (auto *decl : lexicalScope->decls) {
-    assert(
-        !Decl::isKindVarLike(decl->kind) &&
-        "scope declarations cannot be function scoped");
-
-    auto *var = declareNewLocalVariable(
-        functionContext_->function, decl->kind, decl->name);
-    // Initialize it.
-    if (decl->functionInScope)
+void ESTreeIRGen::processVariablesInScope(
+    VariableScope *targetScope,
+    LexicalScope *fromLexical,
+    VariableAction action) {
+  // Create variable declarations for each of the hoisted variables and
+  // functions. Optionally initialize the ordinary variables to undefined.
+  for (auto *decl : fromLexical->decls) {
+    // For now, to avoid changing many tests, delay declaring functions and
+    // parameters till after variables.
+    if (decl->functionInScope || decl->kind == Decl::Kind::Parameter)
       continue;
 
+    auto *res = createVariableOrGlobalProperty(targetScope, decl);
+
+    if (action < VariableAction::Declare)
+      continue;
+
+    // Register the decl in the table.
+    declTable_.insertNew(decl, res);
+
+    if (action < VariableAction::InitOrdinary)
+      continue;
+
+    // If this is not a frame variable (i.e. it is a global property), we
+    // don't need to initialize it.
+    auto *var = dyn_cast<Variable>(res);
+    if (!var)
+      continue;
+
+    // Initialize the variable to undefined.
     Builder.createStoreFrameInst(Builder.getLiteralUndefined(), var);
     if (var->getRelatedVariable()) {
       Builder.createStoreFrameInst(
           Builder.getLiteralUndefined(), var->getRelatedVariable());
     }
   }
+  // This loop is a temporary hack to declare functions after variables and
+  // before parameters.
+  for (auto *decl : fromLexical->decls) {
+    if (!decl->functionInScope || decl->kind == Decl::Kind::Parameter)
+      continue;
+    auto *res = createVariableOrGlobalProperty(targetScope, decl);
+    if (action < VariableAction::Declare)
+      continue;
+    // Register the decl in the table.
+    declTable_.insertNew(decl, res);
+  }
+  // This loop is a temporary hack to declare parameters last.
+  for (auto *decl : fromLexical->decls) {
+    if (decl->kind != Decl::Kind::Parameter)
+      continue;
+    auto *res = createVariableOrGlobalProperty(targetScope, decl);
+    if (action < VariableAction::Declare)
+      continue;
+    // Register the decl in the table.
+    declTable_.insertNew(decl, res);
+  }
+}
+
+void ESTreeIRGen::declareLexicalScope(
+    VariableScope *targetScope,
+    LexicalScope *fromLexical) {
+  processVariablesInScope(
+      targetScope, fromLexical, VariableAction::InitOrdinary);
+
   // Generate and initialize the code for the hoisted function declarations
   // before generating the rest of the body.
-  for (auto funcDecl : lexicalScope->hoistedFunctions) {
+  for (auto funcDecl : fromLexical->hoistedFunctions) {
     genFunctionDeclaration(funcDecl);
   }
 }
 
-GlobalObjectProperty *ESTreeIRGen::declareGlobalProperty(
-    Decl::Kind declKind,
-    Identifier name) {
-  assert(
-      Decl::isKindGlobal(declKind) &&
-      "global property must have a global kind");
-  // Avoid redefining global properties.
-  auto *prop = dyn_cast_or_null<GlobalObjectProperty>(nameTable_.lookup(name));
-  if (prop)
-    return prop;
-
-  LLVM_DEBUG(
-      llvm::dbgs() << "declaring ambient global property " << name << " "
-                   << name.getUnderlyingPointer() << "\n");
-
-  // Register the variable in the scoped hash table.
-  prop = Builder.createGlobalObjectProperty(
-      name, declKind != Decl::Kind::UndeclaredGlobalProperty);
-  nameTable_.insertIntoScope(&topLevelContext->scope, name, prop);
-  return prop;
-}
-
 void ESTreeIRGen::declareGlobals() {
   for (auto &decl : semCtx_.getGlobals()) {
-    declareGlobalProperty(decl.kind, decl.name);
+    declareGlobalProperty(&decl);
   }
 }
 
 Value *ESTreeIRGen::ensureVariableExists(ESTree::IdentifierNode *id) {
-  assert(id && "id must be a valid Identifier node");
-  Identifier name = getNameFieldFromID(id);
-
-  // Check if this is a known variable.
-  if (auto *var = nameTable_.lookup(name))
-    return var;
-
-  // Undeclared variable is an ambient global property.
-  return declareGlobalProperty(Decl::Kind::UndeclaredGlobalProperty, name);
+  assert(id->decl && "identifier must have been resolved");
+  return declTable_.lookupExisting(id->decl);
 }
 
 Value *ESTreeIRGen::genMemberExpressionProperty(
@@ -536,8 +576,7 @@ bool ESTreeIRGen::canCreateLRefWithoutSideEffects(
     hermes::ESTree::Node *target) {
   // Check for an identifier bound to an existing local variable.
   if (auto *iden = dyn_cast<ESTree::IdentifierNode>(target)) {
-    return dyn_cast_or_null<Variable>(
-        nameTable_.lookup(getNameFieldFromID(iden)));
+    return dyn_cast<Variable>(declTable_.lookupExisting(iden->decl));
   }
 
   return false;
@@ -1159,6 +1198,7 @@ Value *ESTreeIRGen::emitOptionalInitialization(
 std::shared_ptr<SerializedScope> ESTreeIRGen::resolveScopeIdentifiers(
     const ScopeChain &chain) {
   std::shared_ptr<SerializedScope> current{};
+#ifdef QQQ
   for (auto it = chain.functions.rbegin(), end = chain.functions.rend();
        it < end;
        it++) {
@@ -1170,20 +1210,33 @@ std::shared_ptr<SerializedScope> ESTreeIRGen::resolveScopeIdentifiers(
     next->parentScope = current;
     current = next;
   }
+#endif
   return current;
 }
 
 void ESTreeIRGen::materializeScopesInChain(
     Function *wrapperFunction,
-    const std::shared_ptr<const SerializedScope> &scope,
+    const SerializedScope *chain,
     int depth) {
-  if (!scope)
+  if (!chain)
     return;
   assert(depth < 1000 && "Excessive scope depth");
 
-  // First materialize parent scopes.
-  materializeScopesInChain(wrapperFunction, scope->parentScope, depth - 1);
+  for (auto &gl : chain->semData->getGlobals()) {
+    declareGlobalProperty(&gl);
+  }
 
+  int curDepth = depth - getDepth(chain) + 1;
+
+  chain->semData->forEachScopeUpTo(
+      chain->lexicalScope,
+      [this, wrapperFunction, &curDepth](LexicalScope *sc) {
+        ExternalScope *ES =
+            Builder.createExternalScope(wrapperFunction, curDepth++);
+        processVariablesInScope(ES, sc, VariableAction::Declare);
+      });
+
+#ifdef QQQ
   // If scope->closureAlias is specified, we must create an alias binding
   // between originalName (which must be valid) and the variable identified by
   // closureAlias.
@@ -1191,10 +1244,10 @@ void ESTreeIRGen::materializeScopesInChain(
   // We do this *before* inserting the other variables below to reflect that
   // the closure alias is conceptually in an outside scope and also avoid the
   // closure name incorrectly shadowing the same name inside the closure.
-  if (scope->closureAlias.isValid()) {
-    assert(scope->originalName.isValid() && "Original name invalid");
+  if (chain->closureAlias.isValid()) {
+    assert(chain->originalName.isValid() && "Original name invalid");
     assert(
-        scope->originalName != scope->closureAlias &&
+        chain->originalName != chain->closureAlias &&
         "Original name must be different from the alias");
 
     // NOTE: the closureAlias target must exist and must be a Variable.
@@ -1203,14 +1256,7 @@ void ESTreeIRGen::materializeScopesInChain(
     // Re-create the alias.
     nameTable_.insert(scope->originalName, closureVar);
   }
-
-  // Create an external scope.
-  ExternalScope *ES = Builder.createExternalScope(wrapperFunction, depth);
-  for (auto variableId : scope->variables) {
-    auto *variable =
-        Builder.createVariable(ES, Variable::DeclKind::Var, variableId);
-    nameTable_.insert(variableId, variable);
-  }
+#endif
 }
 
 namespace {
@@ -1228,33 +1274,31 @@ void buildDummyLexicalParent(
 }
 } // namespace
 
-/// Add dummy functions for lexical scope debug info.
-// They are never executed and serve no purpose other than filling in debug
-// info. This is currently necessary because we can't rely on parent bytecode
-// modules for lexical scoping data.
 void ESTreeIRGen::addLexicalDebugInfo(
     Function *child,
     Function *global,
-    const std::shared_ptr<const SerializedScope> &scope) {
-  if (!scope || !scope->parentScope) {
+    const SerializedScope *scope) {
+  if (!scope || !scope->lexicalScope) {
     buildDummyLexicalParent(Builder, global, child);
     return;
   }
 
-  auto *current = Builder.createFunction(
-      scope->originalName,
-      Function::DefinitionKind::ES5Function,
-      false,
-      {},
-      false);
+  auto *curLexical = scope->lexicalScope;
+  do {
+    Function *current = !curLexical->parentScope
+        ? global
+        : Builder.createFunction(
+              Identifier{},
+              Function::DefinitionKind::ES5Function,
+              false,
+              {},
+              false);
 
-  for (auto &var : scope->variables) {
-    Builder.createVariable(
-        current->getFunctionScope(), Variable::DeclKind::Var, var);
-  }
-
-  buildDummyLexicalParent(Builder, current, child);
-  addLexicalDebugInfo(current, global, scope->parentScope);
+    processVariablesInScope(
+        current->getFunctionScope(), curLexical, VariableAction::Create);
+    buildDummyLexicalParent(Builder, current, child);
+    child = current;
+  } while ((curLexical = curLexical->parentScope) != nullptr);
 }
 
 #ifndef HERMESVM_LEAN
@@ -1272,13 +1316,11 @@ std::shared_ptr<SerializedScope> ESTreeIRGen::saveCurrentScope() {
         !curFunction()->getPreviousContext()->getPreviousContext())) &&
       "Expected exactly one function on the stack.");
 
-  scope->parentScope = lexicalScopeChain;
+  scope->semData = semCtx_.getDataPtr();
+  scope->lexicalScope = lexicalScope_;
   scope->originalName = func->getOriginalOrInferredName();
   if (auto *closure = func->getLazyClosureAlias()) {
     scope->closureAlias = closure->getName();
-  }
-  for (auto *var : func->getFunctionScope()->getVariables()) {
-    scope->variables.push_back(var->getName());
   }
   return scope;
 }

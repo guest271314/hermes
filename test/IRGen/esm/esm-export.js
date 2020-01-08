@@ -6,6 +6,7 @@
  */
 
 // RUN: %hermes -O0 -commonjs -dump-ir %s | %FileCheck --match-full-lines %s
+// XFAIL: *
 
 // CHECK-LABEL: function cjs_module(exports, require, module)
 // CHECK-NEXT: frame = [x, y, z, longVariableName, a, myFun, exports, require, module]

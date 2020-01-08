@@ -12,7 +12,7 @@ function foo(x = () => this) {
 }
 
 //CHECK-LABEL:function foo(x)
-//CHECK-NEXT:frame = [?anon_0_this, ?anon_1_new.target, x]
+//CHECK-NEXT:frame = [x, ?anon_0_this, ?anon_1_new.target]
 //CHECK-NEXT:%BB0:
 //CHECK-NEXT:  %0 = StoreFrameInst %this, [?anon_0_this]
 //CHECK-NEXT:  %1 = GetNewTargetInst

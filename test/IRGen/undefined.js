@@ -9,7 +9,7 @@
 // RUN: %hermes -hermes-parser -dump-ir %s -O
 
 //CHECK-LABEL:function global()
-//CHECK-NEXT:frame = [], globals = [foo]
+//CHECK-NEXT:frame = [], globals = [undefined, foo]
 //CHECK-NEXT:  %BB0:
 //CHECK-NEXT:    %0 = CreateFunctionInst %foo()
 //CHECK-NEXT:    %1 = StorePropertyInst %0 : closure, globalObject : object, "foo" : string

@@ -33,6 +33,7 @@ void ESTreeIRGen::genTryStatement(ESTree::TryStatementNode *tryStmt) {
               tryStmt,
               tryStmt->_finalizer->getDebugLoc(),
               [this](ESTree::Node *node, ControlFlowChange, BasicBlock *) {
+                DeclTable::Level level{declTable_};
                 genStatement(cast<ESTree::TryStatementNode>(node)->_finalizer);
               });
         } else {
@@ -47,6 +48,7 @@ void ESTreeIRGen::genTryStatement(ESTree::TryStatementNode *tryStmt) {
       // emitNormalCleanup.
       [this, tryStmt]() {
         if (tryStmt->_finalizer) {
+          DeclTable::Level level{declTable_};
           genStatement(tryStmt->_finalizer);
           Builder.setLocation(SourceErrorManager::convertEndToLocation(
               tryStmt->_finalizer->getSourceRange()));
@@ -58,10 +60,6 @@ void ESTreeIRGen::genTryStatement(ESTree::TryStatementNode *tryStmt) {
         if (tryStmt->_handler) {
           auto *catchClauseNode =
               dyn_cast<ESTree::CatchClauseNode>(tryStmt->_handler);
-
-          // Catch takes a exception variable, hence we need to create a new
-          // scope for it.
-          NameTableScopeTy newScope(nameTable_);
 
           Builder.setLocation(tryStmt->_handler->getDebugLoc());
           prepareCatch(catchClauseNode->_param);
@@ -96,7 +94,7 @@ CatchInst *ESTreeIRGen::prepareCatch(ESTree::NodePtr catchParam) {
         Twine("Destructuring in catch parameters is currently unsupported"));
     return nullptr;
   }
-
+  auto *id = cast<ESTree::IdentifierNode>(catchParam);
   auto catchVariableName =
       getNameFieldFromID(cast<ESTree::IdentifierNode>(catchParam));
 
@@ -113,11 +111,7 @@ CatchInst *ESTreeIRGen::prepareCatch(ESTree::NodePtr catchParam) {
 
   /// Insert the synthesized variable into the function name table, so it can
   /// be looked up internally.
-  nameTable_.insertIntoScope(
-      &curFunction()->scope, errorVar->getName(), errorVar);
-
-  // Alias the lexical name to the synthesized variable.
-  nameTable_.insert(catchVariableName, errorVar);
+  declTable_.insertNew(id->decl, errorVar);
 
   emitStore(Builder, catchInst, errorVar, true);
   return catchInst;

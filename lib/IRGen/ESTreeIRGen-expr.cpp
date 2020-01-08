@@ -341,10 +341,8 @@ Value *ESTreeIRGen::genCallExpr(ESTree::CallExpressionNode *call) {
 
   // Check for a direct call to eval().
   if (auto *identNode = dyn_cast<ESTree::IdentifierNode>(call->_callee)) {
-    if (Identifier::getFromPointer(identNode->_name) == identEval_) {
-      auto *evalVar = nameTable_.lookup(identEval_);
-      if (!evalVar || isa<GlobalObjectProperty>(evalVar))
-        return genCallEvalExpr(call);
+    if (identNode->decl->special == Decl::Special::Eval) {
+      return genCallEvalExpr(call);
     }
   }
 
@@ -1269,15 +1267,11 @@ Value *ESTreeIRGen::genUnaryExpression(ESTree::UnaryExpressionNode *U) {
       assert(
           !curFunction()->function->isStrictMode() &&
           "delete identifier encountered in strict mode");
-      // Check if this is a known variable.
-      Identifier name = getNameFieldFromID(iden);
-      auto *var = nameTable_.lookup(name);
 
-      if (!var || isa<GlobalObjectProperty>(var)) {
-        // If the variable doesn't exist or if it is global, we must generate
-        // a delete global property instruction.
+      if (Decl::isKindGlobal(iden->decl->kind)) {
+        // If it is global, try to delete it.
         return Builder.createDeletePropertyInst(
-            Builder.getGlobalObject(), Builder.getLiteralString(name));
+            Builder.getGlobalObject(), iden->decl->name);
       } else {
         // Otherwise it is a local variable which can't be deleted and we just
         // return false.
@@ -1421,8 +1415,7 @@ Value *ESTreeIRGen::genIdentifierExpression(
   // 'arguments' is an array-like object holding all function arguments.
   // If one of the parameters is called "arguments" then it shadows the
   // arguments keyword.
-  if (Iden->_name->str() == "arguments" &&
-      !nameTable_.count(getNameFieldFromID(Iden))) {
+  if (Iden->decl->special == Decl::Special::Arguments) {
     // If it is captured, we must use the captured value.
     if (curFunction()->capturedArguments) {
       return Builder.createLoadFrameInst(curFunction()->capturedArguments);

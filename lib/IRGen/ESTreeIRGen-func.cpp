@@ -12,6 +12,22 @@
 namespace hermes {
 namespace irgen {
 
+LexicalScopeRAII::LexicalScopeRAII(
+    ESTreeIRGen *irGen,
+    sem::LexicalScope *scope,
+    bool declare)
+    : irGen_(irGen), savedLexicalScope_(irGen->lexicalScope_) {
+  irGen->lexicalScope_ = scope;
+  if (declare) {
+    irGen->declareLexicalScope(
+        irGen->curFunction()->function->getFunctionScope(), scope);
+  }
+}
+
+LexicalScopeRAII::~LexicalScopeRAII() {
+  irGen_->lexicalScope_ = savedLexicalScope_;
+}
+
 //===----------------------------------------------------------------------===//
 // FunctionContext
 
@@ -19,12 +35,15 @@ FunctionContext::FunctionContext(
     ESTreeIRGen *irGen,
     Function *function,
     sem::FunctionInfo *semInfo)
-    : irGen_(irGen),
+    : LexicalScopeRAII(
+          irGen,
+          semInfo ? semInfo->getFunctionScope() : nullptr,
+          false),
       semInfo_(semInfo),
       oldContext_(irGen->functionContext_),
       builderSaveState_(irGen->Builder),
-      function(function),
-      scope(irGen->nameTable_) {
+      declTableLevel_(irGen->declTable_),
+      function(function) {
   irGen->functionContext_ = this;
 
   // Initialize it to LiteraUndefined by default to avoid corner cases.
@@ -56,12 +75,11 @@ Identifier FunctionContext::genAnonymousLabelName(StringRef hint) {
 void ESTreeIRGen::genFunctionDeclaration(
     ESTree::FunctionDeclarationNode *func) {
   // Find the name of the function.
-  Identifier functionName = getNameFieldFromID(func->_id);
+  auto *functionId = cast<ESTree::IdentifierNode>(func->_id);
+  Identifier functionName = Identifier::getFromPointer(functionId->_name);
   LLVM_DEBUG(dbgs() << "IRGen function \"" << functionName << "\".\n");
 
-  auto *funcStorage = nameTable_.lookup(functionName);
-  assert(
-      funcStorage && "function declaration variable should have been hoisted");
+  auto *funcStorage = declTable_.lookupExisting(functionId->decl);
 
   Function *newFunc = func->_generator
       ? genGeneratorFunction(functionName, nullptr, func)
@@ -81,25 +99,19 @@ Value *ESTreeIRGen::genFunctionExpression(
              << Builder.getInsertionBlock()->getParent()->getInternalName()
              << ".\n");
 
-  NameTableScopeTy newScope(nameTable_);
   Variable *tempClosureVar = nullptr;
 
   Identifier originalNameIden = nameHint;
-  if (FE->_id) {
+  if (auto *id = cast_or_null<ESTree::IdentifierNode>(FE->_id)) {
     auto closureName = genAnonymousLabelName("closure");
     tempClosureVar = Builder.createVariable(
         curFunction()->function->getFunctionScope(),
         Variable::DeclKind::FunctionExprName,
         closureName);
 
-    // Insert the synthesized variable into the name table, so it can be
-    // looked up internally as well.
-    nameTable_.insertIntoScope(
-        &curFunction()->scope, tempClosureVar->getName(), tempClosureVar);
+    declTable_.insertNew(id->decl, tempClosureVar);
 
-    // Alias the lexical name to the synthesized variable.
     originalNameIden = getNameFieldFromID(FE->_id);
-    nameTable_.insert(originalNameIden, tempClosureVar);
   }
 
   Function *newFunc = FE->_generator
@@ -369,47 +381,10 @@ void ESTreeIRGen::emitFunctionPrologue(
   curFunction()->createArgumentsInst = Builder.createCreateArgumentsInst();
 
   if (doEmitLocals == DoEmitLocals::Yes) {
-    // Create variable declarations for each of the hoisted variables and
-    // functions. Initialize only the variables to undefined.
-    for (auto *decl : semInfo->getFunctionScope()->decls) {
-      // For now, to avoid changing many tests, delay declaring parameters till
-      // after everything else.
-      if (decl->kind == Decl::Kind::Parameter)
-        continue;
-
-      // For now, to avoid changing many tests, delay declaring functions till
-      // after variables.
-      if (decl->functionInScope)
-        continue;
-
-      // Don't define undeclared global properties, they will be auto-declared
-      // when the variable is looked up.
-      // But why not pre-declare them? Because they may have been defined by the
-      // ScopedChain, in which case the validator doesn't know about them, but
-      // IRGen has them in the name table. This is a temporary situation.
-      if (decl->kind == Decl::Kind::UndeclaredGlobalProperty)
-        continue;
-
-      auto res =
-          declareVariableOrGlobalProperty(newFunc, decl->kind, decl->name);
-      // If this is not a frame variable or it was already declared, skip.
-      auto *var = dyn_cast<Variable>(res.first);
-      if (!var || !res.second)
-        continue;
-
-      // Otherwise, initialize it to undefined.
-      Builder.createStoreFrameInst(Builder.getLiteralUndefined(), var);
-      if (var->getRelatedVariable()) {
-        Builder.createStoreFrameInst(
-            Builder.getLiteralUndefined(), var->getRelatedVariable());
-      }
-    }
-    // This loop is a temporary hack to declare functions after variables.
-    for (auto *decl : semInfo->getFunctionScope()->decls) {
-      if (!decl->functionInScope)
-        continue;
-      declareVariableOrGlobalProperty(newFunc, decl->kind, decl->name);
-    }
+    processVariablesInScope(
+        newFunc->getFunctionScope(),
+        semInfo->getFunctionScope(),
+        VariableAction::InitOrdinary);
   }
 
   // Always create the "this" parameter. It needs to be created before we
@@ -445,19 +420,6 @@ void ESTreeIRGen::emitParameters(ESTree::FunctionLikeNode *funcNode) {
   auto *newFunc = curFunction()->function;
 
   LLVM_DEBUG(dbgs() << "IRGen function parameters.\n");
-
-  // in order to mimic an old behavior and avoid updating many tests.
-  // This loop is a temporary hack to declare parameters after everything else,
-  // in order to mimic an old behavior and avoid updating many tests.
-  for (auto *decl : curFunction()->getSemInfo()->getFunctionScope()->decls) {
-    // Parameters are always first in the list, so when we encounter a non-
-    // parameter, we are done.
-    if (decl->kind != Decl::Kind::Parameter)
-      break;
-    // FIXME: with default initializers parameters can be accessed before they
-    // have been initialized. So we need both TDZ and a default value.
-    declareVariableOrGlobalProperty(newFunc, decl->kind, decl->name);
-  }
 
   // FIXME: T42569352 TDZ for parameters used in initializer expressions.
   uint32_t paramIndex = uint32_t{0} - 1;

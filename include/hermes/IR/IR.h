@@ -32,6 +32,11 @@
 
 namespace hermes {
 
+namespace sem {
+class SemData;
+class LexicalScope;
+} // namespace sem
+
 class Module;
 class VariableScope;
 class Function;
@@ -323,8 +328,11 @@ static inline bool kindIsA(ValueKind kind, ValueKind base) {
 /// should be captured from a function two levels down the lexical stack.
 class SerializedScope {
  public:
-  /// Parent scope, if any.
-  std::shared_ptr<const SerializedScope> parentScope;
+  /// This pointer keeps the entire SemData structure alive.
+  std::shared_ptr<sem::SemData> semData;
+  /// The active lexical scope within SemData.
+  sem::LexicalScope *lexicalScope;
+
   /// Original name of the function, if any.
   Identifier originalName;
   /// The generated name of the variable holding the function in the parent's
@@ -333,8 +341,6 @@ class SerializedScope {
   /// valid) and said variable, which must have a different name (since it is
   /// generated). Function::lazyClosureAlias_.
   Identifier closureAlias;
-  /// List of variable names in the frame.
-  llvm::SmallVector<Identifier, 16> variables;
 };
 
 /// The source of a lazy AST node.

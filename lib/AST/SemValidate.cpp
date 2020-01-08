@@ -284,5 +284,17 @@ bool validateFunctionAST(
       function, strict == ESTree::Strictness::StrictMode);
 }
 
+bool validateLazyFunctionAST(
+    Context &astContext,
+    SemContext &semCtx,
+    LexicalScope *lexicalScope,
+    Node *function,
+    ESTree::Strictness strict) {
+  PerfSection validation("Validating JavaScript function AST: Deep");
+  SemanticValidator validator{astContext, semCtx, lexicalScope};
+  return validator.doLazyFunction(
+      function, strict == ESTree::Strictness::StrictMode);
+}
+
 } // namespace sem
 } // namespace hermes

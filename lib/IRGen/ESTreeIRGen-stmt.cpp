@@ -205,8 +205,7 @@ void ESTreeIRGen::genStatement(ESTree::Node *stmt) {
 
 void ESTreeIRGen::genBlockStatement(ESTree::BlockStatementNode *block) {
   if (auto *lexicalScope = block->getOptionalLexicalScope()) {
-    NameTableScopeTy nameScope{nameTable_};
-    declareLexicalScope(lexicalScope);
+    LexicalScopeRAII ls{this, lexicalScope};
     genBody(block->_body);
   } else {
     genBody(block->_body);
@@ -322,10 +321,12 @@ void ESTreeIRGen::genForWhileLoops(
   Builder.setInsertionBlock(preTestBlock);
 
   // Branch out of the loop if the condition is false.
-  if (preTest)
+  if (preTest) {
+    DeclTable::Level level{declTable_};
     genExpressionBranch(preTest, bodyBlock, exitBlock);
-  else
+  } else {
     Builder.createBranchInst(bodyBlock);
+  }
 
   // Generate the update sequence of 'for' loops.
   Builder.setInsertionBlock(updateBlock);
@@ -355,8 +356,7 @@ void ESTreeIRGen::genForWhileLoops(
 }
 
 void ESTreeIRGen::genForStatement(ESTree::ForStatementNode *forStmt) {
-  NameTableScopeTy nameScope{nameTable_};
-  declareLexicalScope(forStmt->getLexicalScope());
+  LexicalScopeRAII ls{this, forStmt->getLexicalScope()};
 
   genForWhileLoops(
       forStmt,
@@ -368,8 +368,7 @@ void ESTreeIRGen::genForStatement(ESTree::ForStatementNode *forStmt) {
 }
 
 void ESTreeIRGen::genForInStatement(ESTree::ForInStatementNode *ForInStmt) {
-  NameTableScopeTy nameScope{nameTable_};
-  declareLexicalScope(ForInStmt->getLexicalScope());
+  LexicalScopeRAII ls{this, ForInStmt->getLexicalScope()};
 
   // The state of the enumerator. Notice that the instruction writes to the
   // storage
@@ -480,8 +479,7 @@ void ESTreeIRGen::genForInStatement(ESTree::ForInStatementNode *ForInStmt) {
 }
 
 void ESTreeIRGen::genForOfStatement(ESTree::ForOfStatementNode *forOfStmt) {
-  NameTableScopeTy nameScope{nameTable_};
-  declareLexicalScope(forOfStmt->getLexicalScope());
+  LexicalScopeRAII ls{this, forOfStmt->getLexicalScope()};
 
   auto *function = Builder.getInsertionBlock()->getParent();
   auto *getNextBlock = Builder.createBasicBlock(function);
@@ -625,8 +623,7 @@ void ESTreeIRGen::genSwitchStatement(ESTree::SwitchStatementNode *switchStmt) {
   // The discriminator expression.
   Value *discr = genExpression(switchStmt->_discriminant);
 
-  NameTableScopeTy nameScope{nameTable_};
-  declareLexicalScope(switchStmt->getLexicalScope());
+  LexicalScopeRAII ls{this, switchStmt->getLexicalScope()};
 
   // Sequentially allocate a basic block for each case, compare the discriminant
   // against the case value and conditionally jump to the basic block.
@@ -690,8 +687,7 @@ void ESTreeIRGen::genConstSwitchStmt(
   // The discriminator expression.
   Value *discr = genExpression(switchStmt->_discriminant);
 
-  NameTableScopeTy nameScope{nameTable_};
-  declareLexicalScope(switchStmt->getLexicalScope());
+  LexicalScopeRAII ls{this, switchStmt->getLexicalScope()};
 
   // Save the block where we will insert the switch instruction.
   auto *startBlock = Builder.getInsertionBlock();
@@ -743,6 +739,7 @@ void ESTreeIRGen::genConstSwitchStmt(
 
 void ESTreeIRGen::genImportDeclaration(
     ESTree::ImportDeclarationNode *importDecl) {
+#ifdef UNUSED_IMPLEMENT_ESM
   assert(
       Mod->getContext().getUseCJSModules() &&
       "import/export requires module mode");
@@ -791,10 +788,12 @@ void ESTreeIRGen::genImportDeclaration(
     }
   }
   return;
+#endif
 }
 
 void ESTreeIRGen::genExportNamedDeclaration(
     ESTree::ExportNamedDeclarationNode *exportDecl) {
+#ifdef UNUSED_IMPLEMENT_ESM
   assert(
       Mod->getContext().getUseCJSModules() &&
       "import/export requires module mode");
@@ -865,10 +864,12 @@ void ESTreeIRGen::genExportNamedDeclaration(
     Builder.createStorePropertyInst(
         local, exports, getNameFieldFromID(exportedIdent));
   }
+#endif
 }
 
 void ESTreeIRGen::genExportDefaultDeclaration(
     ESTree::ExportDefaultDeclarationNode *exportDecl) {
+#ifdef UNUSED_IMPLEMENT_ESM
   // Modules have these arguments: (exports, require, module)
   Parameter *exports = Builder.getFunction()->getParameters()[0];
   assert(
@@ -896,6 +897,7 @@ void ESTreeIRGen::genExportDefaultDeclaration(
     auto *value = genExpression(decl);
     Builder.createStorePropertyInst(value, exports, identDefaultExport_);
   }
+#endif
 }
 
 void ESTreeIRGen::genExportAllDeclaration(

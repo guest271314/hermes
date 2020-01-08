@@ -18,6 +18,7 @@
 // Use this value to enable debug logging from the command line.
 #define DEBUG_TYPE "irgen"
 
+using llvm::cast_or_null;
 using llvm::dbgs;
 using llvm::dyn_cast_or_null;
 
@@ -61,11 +62,65 @@ inline Identifier getNameFieldFromID(const ESTree::Node *ID) {
 bool isConstantExpr(ESTree::Node *node);
 
 //===----------------------------------------------------------------------===//
-// FunctionContext
+// DeclTable
 
-/// Scoped hash table to represent the JS scope.
-using NameTableTy = hermes::ScopedHashTable<Identifier, Value *>;
-using NameTableScopeTy = hermes::ScopedHashTableScope<Identifier, Value *>;
+/// Map from sem::Decl * to Value *, with support of bulk removal of all
+/// insertions after a certain point.
+class DeclTable {
+  using MapT = llvm::DenseMap<sem::Decl *, Value *>;
+
+ public:
+  class Level;
+  using size_type = MapT::size_type;
+
+  /// Insert a new key into the map.
+  void insertNew(sem::Decl *decl, Value *val);
+
+  /// Lookup a key that must existing.
+  Value *lookupExisting(const sem::Decl *key) const;
+
+  /// Lookup a key that may be missing.
+  Value *lookupOptional(const sem::Decl *key) const;
+
+  size_type count(sem::Decl *decl) const {
+    return map_.count(decl);
+  }
+
+ private:
+  MapT map_{};
+  Level *level_ = nullptr;
+};
+
+/// A RAII marker which erases all keys that were added to the table after its
+/// construction.
+/// Usage of this class is technically not necessary for the IRGen algorithm
+/// to work. We are using it for two reasons:
+/// - It potentially decreases the load of the hash table.
+/// - In debug builds we have decided to enforce the invariant that a sem::Decl
+/// can only be inserted once. It helps catch errors. In cases where we are
+/// legitimately compiling the same code more than once, leading to inserting
+/// its decls more than once, we need to clean up before the repeat.
+class DeclTable::Level {
+  friend class DeclTable;
+
+ public:
+  Level(const Level &) = delete;
+  void operator=(const Level &) = delete;
+
+  explicit Level(DeclTable &table);
+  ~Level();
+
+ private:
+  /// The table we are associated with.
+  DeclTable &table_;
+  /// The previous level.
+  Level *const prevLevel_;
+  /// Keys that have been added since construction.
+  llvm::SmallVector<sem::Decl *, 1> keys_{};
+};
+
+//===----------------------------------------------------------------------===//
+// FunctionContext
 
 /// Holds the target basic block for a break and continue label.
 /// It has a 1-to-1 correspondence to SemInfoFunction::GotoLabel.
@@ -81,13 +136,28 @@ struct GotoLabel {
   SurroundingTry *surroundingTry = nullptr;
 };
 
-/// Holds per-function state, specifically label tables. Should be constructed
-/// on the stack. Upon destruction it automatically restores the previous
-/// function context.
-class FunctionContext {
+/// A RAII convenience wrapper setting the current lexical scope and declaring
+/// all of its declarations, and restoring the previous ones on destruction.
+class LexicalScopeRAII {
+ public:
+  LexicalScopeRAII(
+      ESTreeIRGen *irGen,
+      sem::LexicalScope *scope,
+      bool declare = true);
+  ~LexicalScopeRAII();
+
+ protected:
   /// Pointer to the "outer" object this is associated with.
   ESTreeIRGen *const irGen_;
 
+ private:
+  sem::LexicalScope *const savedLexicalScope_;
+};
+
+/// Holds per-function state, specifically label tables. Should be constructed
+/// on the stack. Upon destruction it automatically restores the previous
+/// function context.
+class FunctionContext : public LexicalScopeRAII {
   /// Semantic info of the funciton we are emitting.
   sem::FunctionInfo *const semInfo_;
 
@@ -102,15 +172,16 @@ class FunctionContext {
   /// \c semInfo_.
   llvm::SmallVector<GotoLabel, 2> labels_;
 
+  /// Clean up the declarations introduced by a function after we are done
+  /// with it.
+  DeclTable::Level declTableLevel_;
+
  public:
   /// This is the actual function associated with this context.
   Function *const function;
 
   /// The innermost surrounding try/catch node at any point.
   SurroundingTry *surroundingTry = nullptr;
-
-  /// A new variable scope that is used throughout the body of the function.
-  NameTableScopeTy scope;
 
   /// Stack Register that will hold the return value of the global scope.
   AllocStackInst *globalReturnRegister{nullptr};
@@ -329,6 +400,7 @@ class LReference {
 
 /// Performs lowering of the JSON ESTree down to Hermes IR.
 class ESTreeIRGen {
+  friend class LexicalScopeRAII;
   friend class FunctionContext;
   friend class LReference;
 
@@ -348,13 +420,14 @@ class ESTreeIRGen {
   /// This points to the current function's context. It is saved and restored
   /// whenever we enter a nested function.
   FunctionContext *functionContext_{};
-  /// This is the scoped hash table that saves the mapping between the declared
-  /// names and an instance of Varible or GlobalObjectProperty.
-  NameTableTy nameTable_{};
+  /// Map from sem Decl to IR value.
+  DeclTable declTable_{};
+  // The current semantic lexical scope.
+  sem::LexicalScope *lexicalScope_ = nullptr;
 
   /// Lexical scope chain from the runtime, used to resolve identifiers in local
   /// eval.
-  std::shared_ptr<SerializedScope> lexicalScopeChain;
+  std::shared_ptr<SerializedScope> lexicalScopeChain_;
 
   /// Identifier representing the string "eval".
   const Identifier identEval_;
@@ -774,32 +847,41 @@ class ESTreeIRGen {
     return functionContext_;
   }
 
-  /// Declare a variable or a global property in function \p inFunc,
-  /// depending on whether it is the global scope. Do nothing if the variable
-  /// or property is already declared in that scope.
-  /// \return A pair. pair.first is the variable, and pair.second is set to true
-  ///   if it was declared, false if it already existed.
-  std::pair<Value *, bool> declareVariableOrGlobalProperty(
-      Function *inFunc,
-      Decl::Kind declKind,
-      Identifier name);
+  /// Declare a new global property, if not already declared.
+  GlobalObjectProperty *declareGlobalProperty(sem::Decl *decl);
 
-  /// Declare a new local variable in function \p inFunc by creating a new
-  /// IR Variable and inserting it in the name table.
-  /// \return the new IR variable.
-  Variable *declareNewLocalVariable(
-      Function *inFunc,
-      Decl::Kind declKind,
-      Identifier name);
+  /// Create a new variable or a global property in the target variable scope
+  /// \p targetScope, depending on whether it is the global scope.
+  /// \return the new variable or global property.
+  Value *createVariableOrGlobalProperty(
+      VariableScope *targetScope,
+      sem::Decl *decl);
+
+  enum class VariableAction {
+    /// Only create the IR variable in the target scope.
+    Create,
+    /// Create the IR variable in the target scope and add it to \c declTable_.
+    Declare,
+    /// Create the IR variable in the target scope, add it to \c declTable_, and
+    /// if it is not a function or parameter, initialize it to \c undefined.
+    InitOrdinary,
+  };
+
+  /// Perform the specified action for variables in a scope.
+  /// This function is primarily needed because we don't just initialize the
+  /// declaration list in sequential order. Instead, in order to avoid changing
+  /// many existing tests, we enforce an artificial order. That requirement
+  /// should go away soon.
+  void processVariablesInScope(
+      VariableScope *targetScope,
+      LexicalScope *fromLexical,
+      VariableAction action);
 
   /// Create new local variables and insert them in the name table for all
   /// declarations in the specified lexical scope.
-  void declareLexicalScope(LexicalScope *lexicalScope);
-
-  /// Declare a new global property, if not already declared.
-  GlobalObjectProperty *declareGlobalProperty(
-      Decl::Kind declKind,
-      Identifier name);
+  void declareLexicalScope(
+      VariableScope *targetScope,
+      LexicalScope *fromLexical);
 
   /// Import all global declarations from the context into the name table.
   void declareGlobals();
@@ -1007,14 +1089,17 @@ class ESTreeIRGen {
   /// Materialize the provided scope.
   void materializeScopesInChain(
       Function *wrapperFunction,
-      const std::shared_ptr<const SerializedScope> &scope,
+      const SerializedScope *chain,
       int depth);
 
-  /// Add dummy functions for lexical scope debug info
+  /// Add dummy functions for lexical scope debug info.
+  /// They are never executed and serve no purpose other than filling in debug
+  /// info. This is currently necessary because we can't rely on parent bytecode
+  /// modules for lexical scoping data.
   void addLexicalDebugInfo(
       Function *child,
       Function *global,
-      const std::shared_ptr<const SerializedScope> &scope);
+      const SerializedScope *scope);
 
   /// Save all variables currently in scope, for lazy compilation.
   std::shared_ptr<SerializedScope> saveCurrentScope();
