@@ -7,6 +7,8 @@
 
 #include "ESTreeIRGen.h"
 
+#include "hermes/AST/ES5FindDecls.h"
+
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/SaveAndRestore.h"
 
@@ -428,58 +430,12 @@ GlobalObjectProperty *ESTreeIRGen::declareAmbientGlobalProperty(
   return prop;
 }
 
-namespace {
-/// This visitor structs collects declarations within a single closure without
-/// descending into child closures.
-struct DeclHoisting {
-  /// The list of collected identifiers (variables and functions).
-  llvm::SmallVector<ESTree::VariableDeclaratorNode *, 8> decls{};
-
-  /// A list of functions that need to be hoisted and materialized before we
-  /// can generate the rest of the function.
-  llvm::SmallVector<ESTree::FunctionDeclarationNode *, 8> closures;
-
-  explicit DeclHoisting() = default;
-  ~DeclHoisting() = default;
-
-  /// Extract the variable name from the nodes that can define new variables.
-  /// The nodes that can define a new variable in the scope are:
-  /// VariableDeclarator and FunctionDeclaration>
-  void collectDecls(ESTree::Node *V) {
-    if (auto VD = dyn_cast<ESTree::VariableDeclaratorNode>(V)) {
-      return decls.push_back(VD);
-    }
-
-    if (auto FD = dyn_cast<ESTree::FunctionDeclarationNode>(V)) {
-      return closures.push_back(FD);
-    }
-  }
-
-  bool shouldVisit(ESTree::Node *V) {
-    // Collect declared names, even if we don't descend into children nodes.
-    collectDecls(V);
-
-    // Do not descend to child closures because the variables they define are
-    // not exposed to the outside function.
-    if (isa<ESTree::FunctionDeclarationNode>(V) ||
-        isa<ESTree::FunctionExpressionNode>(V) ||
-        isa<ESTree::ArrowFunctionExpressionNode>(V))
-      return false;
-    return true;
-  }
-
-  void enter(ESTree::Node *V) {}
-  void leave(ESTree::Node *V) {}
-};
-
-} // anonymous namespace.
-
 void ESTreeIRGen::processDeclarationFile(ESTree::ProgramNode *programNode) {
   auto Program = dyn_cast_or_null<ESTree::ProgramNode>(programNode);
   if (!Program)
     return;
 
-  DeclHoisting DH;
+  ESTree::ES5FindDecls DH;
   Program->visit(DH);
 
   // Create variable declarations for each of the hoisted variables.
