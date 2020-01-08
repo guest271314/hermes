@@ -261,6 +261,12 @@ bool JSParserImpl::recursionDepthExceeded() {
 Optional<ESTree::ProgramNode *> JSParserImpl::parseProgram() {
   SMLoc startLoc = tok_->getStartLoc();
   SaveStrictMode saveStrict{this};
+
+  assert(
+      !functionScope_ &&
+      "function scope must not be set when parsing a program");
+  assert(!curScope_ && "lexical scope must not be set when parsing a program");
+  LexicalScope lexicalScope{*this};
   ESTree::NodeList stmtList;
 
   if (!parseStatementList(
@@ -276,6 +282,8 @@ Optional<ESTree::ProgramNode *> JSParserImpl::parseProgram() {
       endLoc,
       new (context_) ESTree::ProgramNode(std::move(stmtList)));
   program->strictness = ESTree::makeStrictness(isStrictMode());
+  lexicalScope.moveTo(program);
+
   return program;
 }
 
@@ -284,6 +292,12 @@ JSParserImpl::parseFunctionDeclaration(Param param, bool forceEagerly) {
   auto optRes = parseFunctionHelper(param, true, forceEagerly);
   if (!optRes)
     return None;
+  addDeclToScope(*optRes);
+  // If this function declaration is not in function scope, add it to the
+  // list of special "block scoped function declarations". They have special
+  // rules dictated by Annex B 3.3.
+  if (curScope_ != functionScope_)
+    scopedFuncDecls_.push_back(context_, *optRes);
   return cast<ESTree::FunctionDeclarationNode>(*optRes);
 }
 
@@ -375,6 +389,7 @@ Optional<ESTree::FunctionLikeNode *> JSParserImpl::parseFunctionHelper(
       node = expr;
     }
 
+    BeginFunctionScope beginFunctionScope{*this};
     AllocationScope scope(context_.getAllocator());
     auto body = parseFunctionBody(Param{}, false, grammarContext, true);
     if (!body)
@@ -383,6 +398,8 @@ Optional<ESTree::FunctionLikeNode *> JSParserImpl::parseFunctionHelper(
     node->strictness = ESTree::makeStrictness(isStrictMode());
     return setLocation(startLoc, body.getValue(), node);
   }
+
+  BeginFunctionScope beginFunctionScope{*this};
 
   auto parsedBody =
       parseFunctionBody(Param{}, forceEagerly, grammarContext, true);
@@ -406,6 +423,7 @@ Optional<ESTree::FunctionLikeNode *> JSParserImpl::parseFunctionHelper(
     expr->strictness = ESTree::makeStrictness(isStrictMode());
     node = expr;
   }
+  node->scopedFuncDecls = std::move(scopedFuncDecls_);
   return setLocation(startLoc, body, node);
 }
 
@@ -547,6 +565,7 @@ Optional<ESTree::Node *> JSParserImpl::parseDeclaration(Param param) {
     auto optClass = parseClassDeclaration(Param{});
     if (!optClass)
       return None;
+    addDeclToScope(*optClass);
 
     return *optClass;
   }
@@ -578,6 +597,7 @@ bool JSParserImpl::parseStatementListItem(
     if (!importDecl) {
       return false;
     }
+    addDeclToScope(*importDecl);
 
     if (allowImportExport == AllowImportExport::Yes) {
       stmtList.push_back(*importDecl.getValue());
@@ -644,6 +664,8 @@ Optional<ESTree::BlockStatementNode *> JSParserImpl::parseBlock(
   assert(check(TokenKind::l_brace));
   SMLoc startLoc = advance().Start;
 
+  LexicalScope lexicalScope{*this};
+
   ESTree::NodeList stmtList;
 
   if (!parseStatementList(
@@ -660,6 +682,7 @@ Optional<ESTree::BlockStatementNode *> JSParserImpl::parseBlock(
       startLoc,
       tok_,
       new (context_) ESTree::BlockStatementNode(std::move(stmtList)));
+  lexicalScope.moveTo(body);
   if (!eat(
           TokenKind::r_brace,
           grammarContext,
@@ -764,6 +787,12 @@ JSParserImpl::parseLexicalDeclaration(Param param) {
       endLoc,
       new (context_)
           ESTree::VariableDeclarationNode(kindIdent, std::move(declList)));
+
+  if (kindIdent == getTokenIdent(TokenKind::rw_var)) {
+    addDeclToFunction(res);
+  } else {
+    addDeclToScope(res);
+  }
 
   ensureDestructuringInitialized(res);
 
@@ -1346,6 +1375,8 @@ Optional<ESTree::Node *> JSParserImpl::parseForStatement(Param param) {
   assert(check(TokenKind::rw_for));
   SMLoc startLoc = advance().Start;
 
+  LexicalScope lexicalScope{*this};
+
   SMLoc lparenLoc = tok_->getStartLoc();
   if (!eat(
           TokenKind::l_paren,
@@ -1376,6 +1407,13 @@ Optional<ESTree::Node *> JSParserImpl::parseForStatement(Param param) {
         endLoc,
         new (context_)
             ESTree::VariableDeclarationNode(declIdent, std::move(declList)));
+
+    if (declIdent == getTokenIdent(TokenKind::rw_var)) {
+      addDeclToFunction(decl);
+    } else {
+      addDeclToScope(decl);
+    }
+
   } else {
     // Productions valid here:
     //   for ( Expression_opt
@@ -1432,11 +1470,15 @@ Optional<ESTree::Node *> JSParserImpl::parseForStatement(Param param) {
 
     ESTree::Node *node;
     if (forInLoop) {
-      node = new (context_) ESTree::ForInStatementNode(
+      auto *n = new (context_) ESTree::ForInStatementNode(
           decl ? decl : expr1, optRightExpr.getValue(), optBody.getValue());
+      lexicalScope.moveTo(n);
+      node = n;
     } else {
-      node = new (context_) ESTree::ForOfStatementNode(
+      auto *n = new (context_) ESTree::ForOfStatementNode(
           decl ? decl : expr1, optRightExpr.getValue(), optBody.getValue());
+      lexicalScope.moveTo(n);
+      node = n;
     }
     return setLocation(startLoc, optBody.getValue(), node);
   } else if (checkAndEat(TokenKind::semi)) {
@@ -1485,11 +1527,10 @@ Optional<ESTree::Node *> JSParserImpl::parseForStatement(Param param) {
     if (!optBody)
       return None;
 
-    return setLocation(
-        startLoc,
-        optBody.getValue(),
-        new (context_) ESTree::ForStatementNode(
-            decl ? decl : expr1, test, update, optBody.getValue()));
+    auto *forStatement = new (context_) ESTree::ForStatementNode(
+        decl ? decl : expr1, test, update, optBody.getValue());
+    lexicalScope.moveTo(forStatement);
+    return setLocation(startLoc, optBody.getValue(), forStatement);
   } else {
     errorExpected(
         TokenKind::semi,
@@ -1649,6 +1690,8 @@ Optional<ESTree::SwitchStatementNode *> JSParserImpl::parseSwitchStatement(
           startLoc))
     return None;
 
+  LexicalScope lexicalScope{*this};
+
   ESTree::NodeList clauseList;
   SMLoc defaultLocation; // location of the 'default' clause
 
@@ -1730,11 +1773,14 @@ Optional<ESTree::SwitchStatementNode *> JSParserImpl::parseSwitchStatement(
           lbraceLoc))
     return None;
 
-  return setLocation(
+  auto *switchStmt = setLocation(
       startLoc,
       endLoc,
       new (context_) ESTree::SwitchStatementNode(
           optDiscriminant.getValue(), std::move(clauseList)));
+
+  lexicalScope.moveTo(switchStmt);
+  return switchStmt;
 }
 
 Optional<ESTree::ThrowStatementNode *> JSParserImpl::parseThrowStatement(
@@ -2200,6 +2246,7 @@ Optional<ESTree::Node *> JSParserImpl::parsePropertyAssignment(bool eagerly) {
               "start of getter declaration",
               startLoc))
         return None;
+      BeginFunctionScope beginFunctionScope{*this};
       auto block =
           parseFunctionBody(ParamReturn, eagerly, JSLexer::AllowRegExp, true);
       if (!block)
@@ -2209,6 +2256,7 @@ Optional<ESTree::Node *> JSParserImpl::parsePropertyAssignment(bool eagerly) {
           nullptr, ESTree::NodeList{}, block.getValue(), false);
       funcExpr->strictness = ESTree::makeStrictness(isStrictMode());
       funcExpr->isMethodDefinition = true;
+      funcExpr->scopedFuncDecls = std::move(scopedFuncDecls_);
       setLocation(startLoc, block.getValue(), funcExpr);
 
       auto *node = new (context_) ESTree::PropertyNode(
@@ -2260,6 +2308,8 @@ Optional<ESTree::Node *> JSParserImpl::parsePropertyAssignment(bool eagerly) {
               "start of setter declaration",
               startLoc))
         return None;
+
+      BeginFunctionScope beginFunctionScope{*this};
       auto block =
           parseFunctionBody(ParamReturn, eagerly, JSLexer::AllowRegExp, true);
       if (!block)
@@ -2269,6 +2319,7 @@ Optional<ESTree::Node *> JSParserImpl::parsePropertyAssignment(bool eagerly) {
           nullptr, std::move(params), block.getValue(), false);
       funcExpr->strictness = ESTree::makeStrictness(isStrictMode());
       funcExpr->isMethodDefinition = true;
+      funcExpr->scopedFuncDecls = std::move(scopedFuncDecls_);
       setLocation(startLoc, block.getValue(), funcExpr);
 
       auto *node = new (context_) ESTree::PropertyNode(
@@ -2341,6 +2392,7 @@ Optional<ESTree::Node *> JSParserImpl::parsePropertyAssignment(bool eagerly) {
             "start of method definition",
             startLoc))
       return None;
+    BeginFunctionScope beginFunctionScope{*this};
     auto optBody =
         parseFunctionBody(ParamReturn, eagerly, JSLexer::AllowRegExp, true);
     if (!optBody)
@@ -2350,6 +2402,7 @@ Optional<ESTree::Node *> JSParserImpl::parsePropertyAssignment(bool eagerly) {
         nullptr, std::move(args), optBody.getValue(), generator);
     funcExpr->strictness = ESTree::makeStrictness(isStrictMode());
     funcExpr->isMethodDefinition = true;
+    funcExpr->scopedFuncDecls = std::move(scopedFuncDecls_);
     setLocation(startLoc, optBody.getValue(), funcExpr);
 
     value = funcExpr;
@@ -3465,6 +3518,7 @@ Optional<ESTree::MethodDefinitionNode *> JSParserImpl::parseMethodDefinition(
           startLoc))
     return None;
 
+  BeginFunctionScope beginFunctionScope{*this};
   auto optBody =
       parseFunctionBody(ParamReturn, eagerly, JSLexer::AllowRegExp, true);
   if (!optBody)
@@ -3483,6 +3537,7 @@ Optional<ESTree::MethodDefinitionNode *> JSParserImpl::parseMethodDefinition(
       "parseMethodDefinition should only be used for classes");
   funcExpr->strictness = ESTree::makeStrictness(true);
   funcExpr->isMethodDefinition = true;
+  funcExpr->scopedFuncDecls = std::move(scopedFuncDecls_);
 
   if (special == SpecialKind::Get && funcExpr->_params.size() != 0) {
     sm_.error(
@@ -3641,6 +3696,8 @@ Optional<ESTree::Node *> JSParserImpl::parseArrowFunctionExpression(
   bool expression;
 
   llvm::SaveAndRestore<bool> oldParamYield(paramYield_, false);
+  BeginFunctionScope beginFunctionScope{*this};
+
   if (check(TokenKind::l_brace)) {
     auto optBody = parseFunctionBody(Param{}, true, JSLexer::AllowDiv, true);
     if (!optBody)
@@ -3659,6 +3716,7 @@ Optional<ESTree::Node *> JSParserImpl::parseArrowFunctionExpression(
       nullptr, std::move(paramList), body, expression);
 
   arrow->strictness = ESTree::makeStrictness(isStrictMode());
+  arrow->scopedFuncDecls = std::move(scopedFuncDecls_);
   return setLocation(leftExpr, body, arrow);
 }
 
@@ -4470,6 +4528,13 @@ ESTree::ExpressionStatementNode *JSParserImpl::parseDirective() {
       new (context_) ESTree::ExpressionStatementNode(strLit, strLit->_value));
 }
 
+void JSParserImpl::addDeclToScope(ESTree::Node *decl) {
+  curScope_->decls.push_back(context_, decl);
+}
+void JSParserImpl::addDeclToFunction(ESTree::Node *decl) {
+  functionScope_->decls.push_back(context_, decl);
+}
+
 namespace {
 /// Upcast an Optional node type to a generic NodePtr, e.g.
 /// \p Optional<FunctionExpressionNode> to \p Optional<NodePtr>.
@@ -4498,6 +4563,9 @@ Optional<ESTree::NodePtr> JSParserImpl::parseLazyFunction(
     SMLoc start) {
   seek(start);
 
+  BeginFunctionScope beginFunctionScope{*this};
+  LexicalScope lexicalScope{*this};
+
   switch (kind) {
     case ESTree::NodeKind::FunctionExpression:
       return castNode(parseFunctionExpression(true));
@@ -4522,6 +4590,7 @@ Optional<ESTree::NodePtr> JSParserImpl::parseLazyFunction(
       llvm_unreachable("Asked to parse unexpected node type");
   }
 }
+
 }; // namespace detail
 }; // namespace parser
 }; // namespace hermes

@@ -8,6 +8,7 @@
 #ifndef HERMES_AST_ESTREE_H
 #define HERMES_AST_ESTREE_H
 
+#include "hermes/AST/ASTList.h"
 #include "hermes/AST/Context.h"
 #include "hermes/Support/StringTable.h"
 
@@ -226,16 +227,26 @@ inline Strictness makeStrictness(bool strictMode) {
   return strictMode ? Strictness::StrictMode : Strictness::NonStrictMode;
 }
 
+class ScopeDecorationBase {
+ public:
+  /// List of all declarations in this scope.
+  ASTList decls{};
+};
+
 /// Decoration for all function-like nodes.
 class FunctionLikeDecoration {
   sem::FunctionInfo *semInfo_{};
 
  public:
+  /// Strictness.
   Strictness strictness{Strictness::NotSet};
   /// Whether this function was a method definiton rather than using 'function'.
   /// Note that getters and setters are also considered method definitions,
   /// as they do not use the keyword 'function'.
   bool isMethodDefinition{false};
+  /// Function declarations in a block scope. They have special rules described
+  /// in Annex B 3.3.
+  ASTList scopedFuncDecls{};
 
   void setSemInfo(sem::FunctionInfo *semInfo) {
     assert(semInfo && "setting semInfo to null");
@@ -249,7 +260,7 @@ class FunctionLikeDecoration {
   }
 };
 
-class ProgramDecoration {
+class ProgramDecoration : public ScopeDecorationBase {
  public:
   // An empty parameter list which we need for compatibility with functions.
   NodeList dummyParamList;
@@ -292,20 +303,25 @@ class StatementDecoration {};
 /// break/continue.
 class LoopStatementDecoration : public LabelDecorationBase {};
 
-class SwitchStatementDecoration : public LabelDecorationBase {};
+class SwitchStatementDecoration : public LabelDecorationBase,
+                                  public ScopeDecorationBase {};
 
 class BreakStatementDecoration : public GotoDecorationBase {};
 class ContinueStatementDecoration : public GotoDecorationBase {};
 
 class LabeledStatementDecoration : public LabelDecorationBase {};
 
-class BlockStatementDecoration {
+class BlockStatementDecoration : public ScopeDecorationBase {
  public:
   /// True if this is a function body that was pruned while pre-parsing.
   bool isLazyFunctionBody{false};
   /// The source buffer id in which this block was found (see \p SourceMgr ).
   uint32_t bufferId;
 };
+
+class ForStatementDecoration : public ScopeDecorationBase {};
+class ForInStatementDecoration : public ScopeDecorationBase {};
+class ForOfStatementDecoration : public ScopeDecorationBase {};
 
 class PatternDecoration {};
 class CoverDecoration {};
@@ -343,6 +359,18 @@ struct DecoratorTrait {
 template <>
 struct DecoratorTrait<BlockStatementNode> {
   using Type = BlockStatementDecoration;
+};
+template <>
+struct DecoratorTrait<ForStatementNode> {
+  using Type = ForStatementDecoration;
+};
+template <>
+struct DecoratorTrait<ForInStatementNode> {
+  using Type = ForInStatementDecoration;
+};
+template <>
+struct DecoratorTrait<ForOfStatementNode> {
+  using Type = ForOfStatementDecoration;
 };
 template <>
 struct DecoratorTrait<BreakStatementNode> {

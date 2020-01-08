@@ -186,6 +186,20 @@ class JSParserImpl {
   /// This is used when checking if `yield` is a valid Identifier name.
   bool paramYield_{false};
 
+  // Forward declaration.
+  class LexicalScope;
+  friend class LexicalScope;
+  class BeginFunctionScope;
+  friend class SaveAndClearScopes;
+
+  /// Points to the current lexical scope, which is somewhere in the stack.
+  LexicalScope *curScope_ = nullptr;
+  /// Points to current function's top lexical scope.
+  LexicalScope *functionScope_ = nullptr;
+  /// Function declarations in a block scope. They have special rules described
+  /// in Annex B 3.3.
+  ESTree::ASTList scopedFuncDecls_{};
+
   // Certain known identifiers which we need to use when constructing the
   // ESTree or when parsing;
   UniqueString *getIdent_;
@@ -745,13 +759,19 @@ class JSParserImpl {
   ///    null if it isn't.
   ESTree::ExpressionStatementNode *parseDirective();
 
+  /// Add a declaration to the current scope's list.
+  void addDeclToScope(ESTree::Node *decl);
+
+  /// Add a declaration to the current function's list.
+  void addDeclToFunction(ESTree::Node *decl);
+
   /// RAII to save and restore the current setting of "strict mode".
   class SaveStrictMode {
     JSParserImpl *const parser_;
     const bool oldValue_;
 
    public:
-    SaveStrictMode(JSParserImpl *parser)
+    explicit SaveStrictMode(JSParserImpl *parser)
         : parser_(parser), oldValue_(parser->isStrictMode()) {}
     ~SaveStrictMode() {
       parser_->setStrictMode(oldValue_);
@@ -763,13 +783,73 @@ class JSParserImpl {
     JSParserImpl *const parser_;
 
    public:
-    TrackRecursion(JSParserImpl *parser) : parser_(parser) {
+    explicit TrackRecursion(JSParserImpl *parser) : parser_(parser) {
       ++parser_->recursionDepth_;
     }
     ~TrackRecursion() {
       --parser_->recursionDepth_;
     }
   };
+};
+
+/// This class stores the declarations in the current lexical scope. It is
+/// always constructed on the stack and automatically saves and restores
+/// the current scope. If the function scope is not set, it sets itself as
+/// the function scope.
+class JSParserImpl::LexicalScope {
+ public:
+  /// List of declarations as they occur.
+  ESTree::ASTList decls{};
+
+  explicit LexicalScope(JSParserImpl &parser)
+      : parser_(parser), saveCurScope(parser.curScope_) {
+    parser.curScope_ = this;
+    if (!parser.functionScope_)
+      parser.functionScope_ = this;
+  }
+  ~LexicalScope() {
+    if (parser_.functionScope_ == this)
+      parser_.functionScope_ = nullptr;
+    parser_.curScope_ = saveCurScope;
+  }
+
+  /// Move the collected declarations to the specified AST
+  /// ScopeDecorationBase.
+  void moveTo(ESTree::ScopeDecorationBase *astScope) {
+    astScope->decls = std::move(decls);
+  }
+
+ private:
+  /// The parser we are working with.
+  JSParserImpl &parser_;
+  /// The previous lexical scope, which we will restore on exit.
+  LexicalScope *const saveCurScope;
+};
+
+/// Save the previous values of curScope_ and functionScope_ and clear them.
+/// On destruction restore the previous values.
+/// It is used when we enter a new function, so that LexicalScope will know to
+/// set functionScope_.
+class JSParserImpl::BeginFunctionScope {
+ public:
+  explicit BeginFunctionScope(JSParserImpl &parser)
+      : parser_(parser),
+        saveCurScope_(parser.curScope_),
+        saveFunctionScope_(parser.functionScope_),
+        saveScopedFunctionDecls_(std::move(parser.scopedFuncDecls_)) {
+    parser.curScope_ = parser.functionScope_ = nullptr;
+  }
+  ~BeginFunctionScope() {
+    parser_.scopedFuncDecls_ = std::move(saveScopedFunctionDecls_);
+    parser_.functionScope_ = saveFunctionScope_;
+    parser_.curScope_ = saveCurScope_;
+  }
+
+ private:
+  JSParserImpl &parser_;
+  LexicalScope *const saveCurScope_;
+  LexicalScope *const saveFunctionScope_;
+  ESTree::ASTList saveScopedFunctionDecls_;
 };
 
 }; // namespace detail

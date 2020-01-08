@@ -16,6 +16,7 @@ ESTree::FunctionExpressionNode *wrapCJSModule(
       new (*context) ESTree::BlockStatementNode(std::move(program->_body));
   moduleBlock->setSourceRange(program->getSourceRange());
   moduleBlock->setDebugLoc(program->getDebugLoc());
+  moduleBlock->decls = std::move(program->decls);
 
   ESTree::NodeList argNames{};
 
@@ -32,7 +33,9 @@ ESTree::FunctionExpressionNode *wrapCJSModule(
 
   auto *wrappedFn = new (*context) ESTree::FunctionExpressionNode(
       nullptr, std::move(argNames), moduleBlock, false);
-  wrappedFn->strictness = ESTree::Strictness::NonStrictMode;
+  wrappedFn->strictness = program->strictness != ESTree::Strictness::NotSet
+      ? program->strictness
+      : ESTree::Strictness::NonStrictMode;
   wrappedFn->setSourceRange(program->getSourceRange());
   wrappedFn->setDebugLoc(program->getDebugLoc());
 
