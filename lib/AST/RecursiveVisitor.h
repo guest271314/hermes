@@ -223,6 +223,10 @@ template <class Visitor>
 void visitESTreeNode(Visitor &v, Node *node, Node *parent = nullptr) {
   RecursiveVisitorDispatch<Visitor>::visit(v, node, parent);
 }
+template <class Visitor>
+void visitESTreeNode(Visitor &v, NodeList &list, Node *parent = nullptr) {
+  RecursiveVisitorDispatch<Visitor>::visit(v, list, parent);
+}
 
 /// Recursively visit the children of the node.
 template <class Visitor, class Node>

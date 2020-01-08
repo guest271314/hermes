@@ -769,13 +769,19 @@ class Variable : public Value {
  public:
   enum class DeclKind {
     Var,
+    FunctionExprName,
     Let,
     Const,
   };
 
   /// Return true if this DeclKind needs to track TDZ.
   static bool declKindNeedsTDZ(DeclKind dk) {
-    return dk != DeclKind::Var;
+    return dk > DeclKind::FunctionExprName;
+  }
+
+  /// Return true if this DeclKind cannot be modified.
+  static bool declIsReadOnly(DeclKind dk) {
+    return dk == DeclKind::FunctionExprName || dk == DeclKind::Const;
   }
 
  private:
@@ -811,6 +817,10 @@ class Variable : public Value {
 
   DeclKind getDeclKind() const {
     return declKind;
+  }
+  /// \return true if this variable is read-only after initialization.
+  bool isDeclReadOnly() const {
+    return declIsReadOnly(declKind);
   }
 
   Identifier getName() const {

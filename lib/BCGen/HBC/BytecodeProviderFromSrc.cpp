@@ -172,7 +172,7 @@ BCProviderFromSrc::createBCProviderFromSrc(
     parserMode = parser::LazyParse;
   }
 
-  sem::SemContext semCtx{};
+  sem::SemContext semCtx{*context, declFileList};
   parser::JSParser parser(*context, fileBufId, parserMode);
   auto parsed = parser.parse();
   if (!parsed ||
@@ -192,7 +192,7 @@ BCProviderFromSrc::createBCProviderFromSrc(
   }
 
   Module M(context);
-  hermes::generateIRFromESTree(parsed.getValue(), &M, declFileList, scopeChain);
+  hermes::generateIRFromESTree(parsed.getValue(), &M, semCtx, scopeChain);
   if (context->getSourceErrorManager().getErrorCount() > 0) {
     return {nullptr, outputManager.getErrorString()};
   }

@@ -8,9 +8,11 @@
 #ifndef HERMES_AST_SEMANTICVALIDATOR_H
 #define HERMES_AST_SEMANTICVALIDATOR_H
 
+#include "hermes/ADT/ScopedHashTable.h"
 #include "hermes/AST/SemValidate.h"
 
 #include "RecursiveVisitor.h"
+#include "ValidatorHelpers.h"
 
 namespace hermes {
 namespace sem {
@@ -22,34 +24,62 @@ class FunctionContext;
 class SemanticValidator;
 
 //===----------------------------------------------------------------------===//
-// Keywords
-
-class Keywords {
- public:
-  /// Identifier for "arguments".
-  const UniqueString *const identArguments;
-  /// Identifier for "eval".
-  const UniqueString *const identEval;
-  /// Identifier for "delete".
-  const UniqueString *const identDelete;
-  /// Identifier for "use strict".
-  const UniqueString *const identUseStrict;
-  /// Identifier for "var".
-  const UniqueString *const identVar;
-  /// Identifier for "let".
-  const UniqueString *const identLet;
-  /// Identifier for "const".
-  const UniqueString *const identConst;
-
-  Keywords(Context &astContext);
-};
-
-//===----------------------------------------------------------------------===//
 // SemanticValidator
 
 /// Class the performs all semantic validation
 class SemanticValidator {
   friend class FunctionContext;
+
+  /// Binding between an identifier and its declaration in a scope.
+  struct Binding {
+    Decl *decl = nullptr;
+    /// The declaring node. Note that this is nullable.
+    Node *node = nullptr;
+
+    Binding() = default;
+    Binding(Decl *decl, Node *node) : decl(decl), node(node) {}
+
+    bool isValid() const {
+      return decl != nullptr;
+    }
+    void invalidate() {
+      decl = nullptr;
+      node = nullptr;
+    }
+  };
+
+  /// The scoped binding table mapping from string to binding.
+  using BindingTableTy = hermes::ScopedHashTable<UniqueString *, Binding>;
+  using BindingTableScopeTy =
+      hermes::ScopedHashTableScope<UniqueString *, Binding>;
+
+  /// A RAII object automatic scopes.
+  /// On construction it creates a new binding table scope and pushes a new
+  /// semantic scope.
+  /// Om destruction it destroys the binding scope and pops the semantic scope.
+  class ScopeRAII {
+   public:
+    /// A tag type indicating that we shouldn't push a semantic scope.
+    struct DontPush {};
+
+    /// Create a binding scope and push a semantic scope.
+    explicit ScopeRAII(SemanticValidator *sm);
+
+    /// Create the global binding scope without pushing a semantic scope.
+    explicit ScopeRAII(SemanticValidator *sm, DontPush);
+
+    ~ScopeRAII();
+
+    BindingTableScopeTy &getBindingScope() {
+      return bindingScope_;
+    }
+
+   private:
+    /// The semantic context. If non-null, pop a scope on destruction.
+    SemData *const semData_;
+    /// The binding table scope.
+    BindingTableScopeTy bindingScope_;
+  };
 
   Context &astContext_;
   /// A copy of Context::getSM() for easier access.
@@ -59,7 +89,7 @@ class SemanticValidator {
   SourceErrorManager::SaveAndBufferMessages bufferMessages_;
 
   /// All semantic tables are persisted here.
-  SemContext &semCtx_;
+  SemData &semData_;
 
   /// Save the initial error count so we know whether we generated any errors.
   const unsigned initialErrorCount_;
@@ -73,6 +103,14 @@ class SemanticValidator {
   /// True if we are validating a formal parameter list.
   bool isFormalParams_{false};
 
+  /// The currently lexically visible names.
+  BindingTableTy bindingTable_{};
+
+  std::deque<ScopeRAII> scopes_{};
+
+  /// The global scope.
+  BindingTableScopeTy *globalScope_ = nullptr;
+
 #ifndef NDEBUG
   /// Our parser detects strictness and initializes the flag in every node,
   /// but if we are reading an external AST, we must look for "use strict" and
@@ -84,10 +122,16 @@ class SemanticValidator {
 #endif
 
  public:
-  explicit SemanticValidator(Context &astContext, sem::SemContext &semCtx);
+  explicit SemanticValidator(
+      Context &astContext,
+      sem::SemContext &semCtx,
+      sem::LexicalScope *lexicalScope);
+
+  ~SemanticValidator();
 
   // Perform the validation on whole AST.
-  bool doIt(Node *rootNode);
+  /// \param global if true, validate the node in global scope.
+  bool doIt(ProgramNode *rootNode, bool global);
 
   /// Perform the validation on an individual function.
   bool doFunction(Node *function, bool strict);
@@ -98,19 +142,24 @@ class SemanticValidator {
     visitESTreeChildren(*this, node);
   }
 
-  void visit(ProgramNode *node);
   void visit(FunctionDeclarationNode *funcDecl);
   void visit(FunctionExpressionNode *funcExpr);
   void visit(ArrowFunctionExpressionNode *arrowFunc);
 
-  void visit(VariableDeclaratorNode *varDecl, Node *parent);
+  void visit(BlockStatementNode *blockStmt, Node *parent);
 
   void visit(MetaPropertyNode *metaProp);
-  void visit(IdentifierNode *identifier);
+  void visit(IdentifierNode *identifier, Node *parent);
 
   void visit(ForInStatementNode *forIn);
   void visit(ForOfStatementNode *forOf);
-  void visitForInOf(LoopStatementNode *loopNode, Node *left);
+  /// Visit a for-of or for-in statement.
+  void visitForInOf(
+      LoopStatementNode *loopNode,
+      Node *left,
+      Node *right,
+      Node *body,
+      ScopeDecorationBase *scopeDecoration);
 
   void visit(AssignmentExpressionNode *assignment);
   void visit(UpdateExpressionNode *update);
@@ -120,6 +169,7 @@ class SemanticValidator {
   void visit(RegExpLiteralNode *regexp);
 
   void visit(TryStatementNode *tryStatement);
+  void visit(CatchClauseNode *catchClause);
 
   void visit(DoWhileStatementNode *loop);
   void visit(ForStatementNode *loop);
@@ -132,6 +182,8 @@ class SemanticValidator {
   void visit(ReturnStatementNode *returnStmt);
   void visit(YieldExpressionNode *yieldExpr);
 
+  void visit(CallExpressionNode *callExpr);
+
   void visit(UnaryExpressionNode *unaryExpr);
 
   void visit(ArrayPatternNode *arrayPat);
@@ -141,10 +193,9 @@ class SemanticValidator {
   void visit(ClassExpressionNode *node);
   void visit(ClassDeclarationNode *node);
 
+  void visit(VariableDeclarationNode *varDecl);
+
   void visit(ImportDeclarationNode *importDecl);
-  void visit(ImportDefaultSpecifierNode *importDecl);
-  void visit(ImportNamespaceSpecifierNode *importDecl);
-  void visit(ImportSpecifierNode *importDecl);
 
   void visit(ExportNamedDeclarationNode *exportDecl);
   void visit(ExportDefaultDeclarationNode *exportDecl);
@@ -169,15 +220,61 @@ class SemanticValidator {
     return funcCtx_;
   }
 
+  /// Start the validation process by visiting a ProgramNode.
+  /// \param global whether to validate in global or local scope.
+  void visitProgram(ProgramNode *node, bool global);
+
+  /// Import all global declarations into the name table.
+  void declareGlobals();
+
+  /// Declare all declarations from \p declList in the current scope by calling
+  /// \c validateAndDeclareIdentifier().
+  void processDeclarationsInScope(ScopeDecorationBase *astScope);
+
+  /// Extract the list of declared identifiers in a declaration node and return
+  /// the declaration kind of the node. The declaration kind is adjusted
+  /// depending on the scope.
+  Decl::Kind extractDeclaredIdents(
+      Node *declarationNode,
+      llvm::SmallVectorImpl<IdentifierNode *> &idents);
+
+  /// Extract the declared identifiers from a declaration AST node's "id" field.
+  /// Normally that is just a single identifier, but it can be more in case of
+  /// destructuring.
+  void extractDeclaredIdentsFromID(
+      Node *node,
+      llvm::SmallVectorImpl<IdentifierNode *> &idents);
+
+  /// Try to create a declaration of the specified kind and name in the current
+  /// scope. If the declaration is invalid, print an error message without
+  /// creating it.
+  /// \param declKind the semantic declaration kind
+  /// \param idNode the AST node containing the name
+  /// \param declNode the AST node of the declaration. Used for function
+  ///     declarations.
+  void validateAndDeclareIdentifier(
+      Decl::Kind declKind,
+      IdentifierNode *idNode,
+      Node *declNode);
+
+  /// Validate a var declaration when it is encountered. This catches the cases
+  /// which couldn't be verified when entering the scope and processing the
+  /// declaration list.
+  void validateVarDeclaration(IdentifierNode *idNode);
+
+  /// Ensure that the specified identifier is valid to be used in a declaration.
+  /// Return true if valid, otherwise generate an error and return false.
+  bool validateDeclarationName(
+      Decl::Kind declKind,
+      const IdentifierNode *idNode) const;
+
   /// Process a function declaration by creating a new FunctionContext. Update
   /// the context with the strictness of the function.
   /// \param node the current node
-  /// \param id if not null, the associated name (for validation)
   /// \param params the parameter list
   /// \param body the body. It may be a BlockStatementNode, an EmptyNode (for
   ///     lazy functions), or an expression (for simple arrow functions).
-  void
-  visitFunction(FunctionLikeNode *node, Node *id, NodeList &params, Node *body);
+  void visitFunction(FunctionLikeNode *node, NodeList &params, Node *body);
 
   /// Scan a list of directives in the beginning of a program of function
   /// (see ES5.1 4.1 - a directive is a statement consisting of a single
@@ -187,22 +284,11 @@ class SemanticValidator {
   /// \return the node containing "use strict" or nullptr.
   Node *scanDirectivePrologue(NodeList &body);
 
-  /// Determine if the argument is something that can be assigned to: a
-  /// variable or a property. 'arguments' cannot be assigned to in strict mode,
-  /// but we don't support code generation for assigning to it in any mode.
-  bool isLValue(const Node *node) const;
+  /// \return true of the node looks like an lvalue. It could still be invalid.
+  bool matchLValue(const Node *node) const;
 
-  /// In strict mode 'arguments' and 'eval' cannot be used in declarations.
-  bool isValidDeclarationName(const IdentifierNode *idNode) const;
-
-  /// Ensure that the declared identifier(s) is valid to be used in a
-  /// declaration and append them to the specified list.
-  /// \param node is one of nullptr, EmptyNode, IdentifierNode, PatternNode.
-  /// \param idents if not-null, all identifiers are appended there.
-  void validateDeclarationNames(
-      FunctionInfo::VarDecl::Kind declKind,
-      Node *node,
-      llvm::SmallVectorImpl<FunctionInfo::VarDecl> *idents);
+  /// Print an error if the node is not a valid assignable l-value.
+  void validateLValue(const Node *node) const;
 
   /// Ensure that the specified node is a valid target for an assignment, in
   /// other words it is an l-value, a Pattern (checked recursively) or an Empty
@@ -216,6 +302,12 @@ class SemanticValidator {
 
   /// Get the LabelDecorationBase depending on the node type.
   static LabelDecorationBase *getLabelDecorationBase(StatementNode *node);
+
+  /// Resolve the variable in the name table. Generate a warning if it cannot
+  /// be found and declare an ambient global property.
+  /// \param inTypeof if true, this is an argument of 'typeof'. So some checks
+  ///     are not performed.
+  void resolveIdentifier(IdentifierNode *identifier, bool inTypeof);
 };
 
 //===----------------------------------------------------------------------===//
@@ -240,12 +332,18 @@ class FunctionContext {
   /// The associated seminfo object
   sem::FunctionInfo *const semInfo;
 
+  /// Whether to pop the sem function on destruction.
+  bool const popAtExit;
+
+  /// Is this function in strict mode.
+  bool strictMode = false;
+
   /// The most nested active loop statement.
   LoopStatementNode *activeLoop = nullptr;
   /// The most nested active loop or switch statement.
   StatementNode *activeSwitchOrLoop = nullptr;
-  /// Is this function in strict mode.
-  bool strictMode = false;
+  /// The AST node of the function.
+  FunctionLikeNode *const node;
 
   /// The currently active labels in the function.
   llvm::DenseMap<NodeLabel, Label> labelMap;
@@ -253,7 +351,8 @@ class FunctionContext {
   explicit FunctionContext(
       SemanticValidator *validator,
       bool strictMode,
-      FunctionLikeNode *node);
+      FunctionLikeNode *node,
+      FunctionInfo *aSemInfo);
 
   ~FunctionContext();
 
@@ -267,6 +366,9 @@ class FunctionContext {
   unsigned allocateLabel() {
     return semInfo->allocateLabel();
   }
+
+  /// \return the optional function name, or nullptr.
+  UniqueString *getFunctionName() const;
 };
 
 } // namespace sem

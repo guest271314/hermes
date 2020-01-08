@@ -19,7 +19,7 @@ namespace {
 /// Left side of assignment must be an LValue.
 TEST(ValidatorTest, TestBadAssignmentLValue) {
   Context ctx;
-  sem::SemContext semCtx{};
+  sem::SemContext semCtx{ctx, DeclarationFileListTy{}};
   DiagContext diag(ctx);
   JSParser parser(ctx, "a + 1 = 10;");
   auto parsed = parser.parse();
@@ -32,7 +32,7 @@ TEST(ValidatorTest, TestBadAssignmentLValue) {
 /// For-in control expression must be an LValue.
 TEST(ValidatorTest, TestBadForLValue) {
   Context ctx;
-  sem::SemContext semCtx{};
+  sem::SemContext semCtx{ctx, DeclarationFileListTy{}};
   DiagContext diag(ctx);
   JSParser parser(ctx, "for(a + 1 in x);");
   auto parsed = parser.parse();
@@ -45,7 +45,7 @@ TEST(ValidatorTest, TestBadForLValue) {
 /// Test an anonymous break outside of a loop.
 TEST(ValidatorTest, UnnamedBreakLabelTest) {
   Context ctx;
-  sem::SemContext semCtx{};
+  sem::SemContext semCtx{ctx, DeclarationFileListTy{}};
   DiagContext diag(ctx);
   JSParser parser(ctx, "break; for(;;) break; break;");
   auto parsed = parser.parse();
@@ -58,7 +58,7 @@ TEST(ValidatorTest, UnnamedBreakLabelTest) {
 /// Test an anonymous continue outside of a loop.
 TEST(ValidatorTest, UnnamedContinueLabelTest) {
   Context ctx;
-  sem::SemContext semCtx{};
+  sem::SemContext semCtx{ctx, DeclarationFileListTy{}};
   DiagContext diag(ctx);
   JSParser parser(ctx, "continue;");
   auto parsed = parser.parse();
@@ -71,7 +71,7 @@ TEST(ValidatorTest, UnnamedContinueLabelTest) {
 /// Test a continue with a block label.
 TEST(ValidatorTest, ContinueWithBlockLabelTest) {
   Context ctx;
-  sem::SemContext semCtx{};
+  sem::SemContext semCtx{ctx, DeclarationFileListTy{}};
   DiagContext diag(ctx);
   JSParser parser(ctx, "label1: { continue label1; }");
   auto parsed = parser.parse();
@@ -84,7 +84,7 @@ TEST(ValidatorTest, ContinueWithBlockLabelTest) {
 /// Test that multiple labels are correctly attached to the same statement.
 TEST(ValidatorTest, ChainedNamedLabelsTest) {
   Context ctx;
-  sem::SemContext semCtx{};
+  sem::SemContext semCtx{ctx, DeclarationFileListTy{}};
   DiagContext diag(ctx);
   JSParser parser(
       ctx,
@@ -99,7 +99,7 @@ TEST(ValidatorTest, ChainedNamedLabelsTest) {
 /// Duplicated label in the scope of the previous one.
 TEST(ValidatorTest, DuplicateNamedLabelTest) {
   Context ctx;
-  sem::SemContext semCtx{};
+  sem::SemContext semCtx{ctx, DeclarationFileListTy{}};
   DiagContext diag(ctx);
   JSParser parser(
       ctx,
@@ -114,7 +114,7 @@ TEST(ValidatorTest, DuplicateNamedLabelTest) {
 
 TEST(ValidatorTest, CorrectDuplicateNamedLabelTest) {
   Context ctx;
-  sem::SemContext semCtx{};
+  sem::SemContext semCtx{ctx, DeclarationFileListTy{}};
   DiagContext diag(ctx);
   JSParser parser(
       ctx, "label1: { break label1; } label1: for(;;) break label1;");
@@ -125,7 +125,7 @@ TEST(ValidatorTest, CorrectDuplicateNamedLabelTest) {
 
 TEST(ValidatorTest, ScopeNamedLabelTest) {
   Context ctx;
-  sem::SemContext semCtx{};
+  sem::SemContext semCtx{ctx, DeclarationFileListTy{}};
   DiagContext diag(ctx);
   JSParser parser(ctx, "label1: ; for(;;) break label1;");
   auto parsed = parser.parse();
@@ -137,7 +137,7 @@ TEST(ValidatorTest, ScopeNamedLabelTest) {
 
 TEST(ValidatorTest, NamedBreakLabelTest) {
   Context ctx;
-  sem::SemContext semCtx{};
+  sem::SemContext semCtx{ctx, DeclarationFileListTy{}};
   DiagContext diag(ctx);
   JSParser parser(
       ctx, "break exitLoop; exitLoop: for(;;) break exitLoop; break exitLoop;");

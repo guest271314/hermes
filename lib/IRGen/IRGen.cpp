@@ -20,10 +20,10 @@ using llvm::dbgs;
 bool generateIRFromESTree(
     ESTree::NodePtr node,
     Module *M,
-    const DeclarationFileListTy &declFileList,
+    sem::SemContext &semCtx,
     const ScopeChain &scopeChain) {
   // Generate IR into the module M.
-  ESTreeIRGen Generator(node, declFileList, M, scopeChain);
+  ESTreeIRGen Generator(node, M, semCtx, scopeChain);
   Generator.doIt();
 
   LLVM_DEBUG(dbgs() << "Finished IRGen.\n");
@@ -36,9 +36,9 @@ void generateIRForCJSModule(
     llvm::StringRef filename,
     Module *M,
     Function *topLevelFunction,
-    const DeclarationFileListTy &declFileList) {
+    sem::SemContext &semCtx) {
   // Generate IR into the module M.
-  ESTreeIRGen generator(node, declFileList, M, {});
+  ESTreeIRGen generator(node, M, semCtx, {});
   return generator.doCJSModule(
       topLevelFunction, node->getSemInfo(), id, filename);
 }
@@ -50,7 +50,7 @@ std::pair<Function *, Function *> generateLazyFunctionIR(
   SimpleDiagHandlerRAII diagHandler{context.getSourceErrorManager()};
 
   AllocationScope alloc(context.getAllocator());
-  sem::SemContext semCtx{};
+  sem::SemContext semCtx{context, DeclarationFileListTy{}};
   hermes::parser::JSParser parser(
       context, lazyData->bufferId, parser::LazyParse);
 
@@ -83,7 +83,7 @@ std::pair<Function *, Function *> generateLazyFunctionIR(
     return {error, error};
   }
 
-  ESTreeIRGen generator{parsed.getValue(), {}, M, {}};
+  ESTreeIRGen generator{parsed.getValue(), M, semCtx, {}};
   return generator.doLazyFunction(lazyData);
 }
 

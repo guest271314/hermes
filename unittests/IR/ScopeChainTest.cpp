@@ -35,15 +35,15 @@ TEST(IRScopeChainTest, BasicScopeChainTest) {
       *context, "print(alpha, beta, gamma, delta);");
   auto parsed = jsParser.parse();
   ASSERT_TRUE(parsed);
-  sem::SemContext semCtx{};
+  DeclarationFileListTy declFileList;
+  sem::SemContext semCtx{*context, declFileList};
   auto validated = validateAST(*context, semCtx, *parsed, true);
   ASSERT_TRUE(validated);
 
   auto *ast = parsed.getValue();
   Module M(context);
 
-  DeclarationFileListTy declFileList;
-  hermes::generateIRFromESTree(ast, &M, declFileList, scopeChain);
+  hermes::generateIRFromESTree(ast, &M, semCtx, scopeChain);
 
   // Count how many frame loads there are.
   int loadsFromGlobals = 0;

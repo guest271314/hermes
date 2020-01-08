@@ -19,6 +19,12 @@ namespace hbc {
 class BackendContext;
 };
 
+namespace ESTree {
+class ProgramNode;
+} // namespace ESTree
+
+using DeclarationFileListTy = std::vector<ESTree::ProgramNode *>;
+
 /// Choices for bundling format, applicable to cross module opts
 enum class BundlerKind { none, metromin };
 

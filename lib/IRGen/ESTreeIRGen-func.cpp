@@ -89,7 +89,7 @@ Value *ESTreeIRGen::genFunctionExpression(
     auto closureName = genAnonymousLabelName("closure");
     tempClosureVar = Builder.createVariable(
         curFunction()->function->getFunctionScope(),
-        Variable::DeclKind::Var,
+        Variable::DeclKind::FunctionExprName,
         closureName);
 
     // Insert the synthesized variable into the name table, so it can be
@@ -143,7 +143,7 @@ Value *ESTreeIRGen::genArrowFunctionExpression(
         InitES5CaptureState::No,
         DoEmitParameters::Yes);
 
-    genStatement(AF->_body);
+    genBlockStatement(cast<ESTree::BlockStatementNode>(AF->_body));
     emitFunctionEpilogue(Builder.getLiteralUndefined());
   }
 
@@ -263,7 +263,7 @@ Function *ESTreeIRGen::genES5Function(
         DoEmitParameters::Yes);
   }
 
-  genStatement(body);
+  genBlockStatement(cast<ESTree::BlockStatementNode>(body));
   emitFunctionEpilogue(Builder.getLiteralUndefined());
 
   return curFunction()->function;
@@ -358,10 +358,6 @@ void ESTreeIRGen::emitFunctionPrologue(
     DoEmitParameters doEmitParameters) {
   auto *newFunc = curFunction()->function;
   auto *semInfo = curFunction()->getSemInfo();
-  LLVM_DEBUG(
-      dbgs() << "Hoisting "
-             << (semInfo->varDecls.size() + semInfo->closures.size())
-             << " variable decls.\n");
 
   Builder.setLocation(newFunc->getSourceRange().Start);
 
@@ -374,9 +370,26 @@ void ESTreeIRGen::emitFunctionPrologue(
 
   // Create variable declarations for each of the hoisted variables and
   // functions. Initialize only the variables to undefined.
-  for (auto decl : semInfo->varDecls) {
-    auto res = declareVariableOrGlobalProperty(
-        newFunc, decl.kind, getNameFieldFromID(decl.identifier));
+  for (auto *decl : semInfo->getFunctionScope()->decls) {
+    // For now, to avoid changing many tests, delay declaring parameters till
+    // after everything else.
+    if (decl->kind == Decl::Kind::Parameter)
+      continue;
+
+    // For now, to avoid changing many tests, delay declaring functions till
+    // after variables.
+    if (decl->functionInScope)
+      continue;
+
+    // Don't define undeclared global properties, they will be auto-declared
+    // when the variable is looked up.
+    // But why not pre-declare them? Because they may have been defined by the
+    // ScopedChain, in which case the validator doesn't know about them, but
+    // IRGen has them in the name table. This is a temporary situation.
+    if (decl->kind == Decl::Kind::UndeclaredGlobalProperty)
+      continue;
+
+    auto res = declareVariableOrGlobalProperty(newFunc, decl->kind, decl->name);
     // If this is not a frame variable or it was already declared, skip.
     auto *var = dyn_cast<Variable>(res.first);
     if (!var || !res.second)
@@ -389,9 +402,11 @@ void ESTreeIRGen::emitFunctionPrologue(
           Builder.getLiteralUndefined(), var->getRelatedVariable());
     }
   }
-  for (auto *fd : semInfo->closures) {
-    declareVariableOrGlobalProperty(
-        newFunc, VarDecl::Kind::Var, getNameFieldFromID(fd->_id));
+  // This loop is a temporary hack to declare functions after variables.
+  for (auto *decl : semInfo->getFunctionScope()->decls) {
+    if (!decl->functionInScope)
+      continue;
+    declareVariableOrGlobalProperty(newFunc, decl->kind, decl->name);
   }
 
   // Always create the "this" parameter. It needs to be created before we
@@ -418,7 +433,7 @@ void ESTreeIRGen::emitFunctionPrologue(
 
   // Generate and initialize the code for the hoisted function declarations
   // before generating the rest of the body.
-  for (auto funcDecl : semInfo->closures) {
+  for (auto funcDecl : semInfo->getFunctionScope()->hoistedFunctions) {
     genFunctionDeclaration(funcDecl);
   }
 }
@@ -428,14 +443,17 @@ void ESTreeIRGen::emitParameters(ESTree::FunctionLikeNode *funcNode) {
 
   LLVM_DEBUG(dbgs() << "IRGen function parameters.\n");
 
-  // Create a variable for every parameter.
-  for (auto paramDecl : funcNode->getSemInfo()->paramNames) {
-    Identifier paramName = getNameFieldFromID(paramDecl.identifier);
-    LLVM_DEBUG(dbgs() << "Adding parameter: " << paramName << "\n");
-    auto *paramStorage = Builder.createVariable(
-        newFunc->getFunctionScope(), Variable::DeclKind::Var, paramName);
-    // Register the storage for the parameter.
-    nameTable_.insert(paramName, paramStorage);
+  // in order to mimic an old behavior and avoid updating many tests.
+  // This loop is a temporary hack to declare parameters after everything else,
+  // in order to mimic an old behavior and avoid updating many tests.
+  for (auto *decl : curFunction()->getSemInfo()->getFunctionScope()->decls) {
+    // Parameters are always first in the list, so when we encounter a non-
+    // parameter, we are done.
+    if (decl->kind != Decl::Kind::Parameter)
+      break;
+    // FIXME: with default initializers parameters can be accessed before they
+    // have been initialized. So we need both TDZ and a default value.
+    declareVariableOrGlobalProperty(newFunc, decl->kind, decl->name);
   }
 
   // FIXME: T42569352 TDZ for parameters used in initializer expressions.

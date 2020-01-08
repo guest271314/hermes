@@ -71,11 +71,7 @@ void ESTreeIRGen::genStatement(ESTree::Node *stmt) {
 
   // IRGen the content of the block.
   if (auto *BS = dyn_cast<ESTree::BlockStatementNode>(stmt)) {
-    for (auto &Node : BS->_body) {
-      genStatement(&Node);
-    }
-
-    return;
+    return genBlockStatement(BS);
   }
 
   if (auto *Label = dyn_cast<ESTree::LabeledStatementNode>(stmt)) {
@@ -110,7 +106,7 @@ void ESTreeIRGen::genStatement(ESTree::Node *stmt) {
 
   if (auto *F = dyn_cast<ESTree::ForStatementNode>(stmt)) {
     LLVM_DEBUG(dbgs() << "IRGen 'for' statement\n");
-    genForWhileLoops(F, F->_init, F->_test, F->_test, F->_update, F->_body);
+    genForStatement(F);
     return;
   }
 
@@ -205,6 +201,16 @@ void ESTreeIRGen::genStatement(ESTree::Node *stmt) {
 
   Builder.getModule()->getContext().getSourceErrorManager().error(
       stmt->getSourceRange(), Twine("invalid statement encountered."));
+}
+
+void ESTreeIRGen::genBlockStatement(ESTree::BlockStatementNode *block) {
+  if (auto *lexicalScope = block->getOptionalLexicalScope()) {
+    NameTableScopeTy nameScope{nameTable_};
+    declareLexicalScope(lexicalScope);
+    genBody(block->_body);
+  } else {
+    genBody(block->_body);
+  }
 }
 
 void ESTreeIRGen::genExpressionWrapper(ESTree::Node *expr) {
@@ -348,7 +354,23 @@ void ESTreeIRGen::genForWhileLoops(
   Builder.setInsertionBlock(exitBlock);
 }
 
+void ESTreeIRGen::genForStatement(ESTree::ForStatementNode *forStmt) {
+  NameTableScopeTy nameScope{nameTable_};
+  declareLexicalScope(forStmt->getLexicalScope());
+
+  genForWhileLoops(
+      forStmt,
+      forStmt->_init,
+      forStmt->_test,
+      forStmt->_test,
+      forStmt->_update,
+      forStmt->_body);
+}
+
 void ESTreeIRGen::genForInStatement(ESTree::ForInStatementNode *ForInStmt) {
+  NameTableScopeTy nameScope{nameTable_};
+  declareLexicalScope(ForInStmt->getLexicalScope());
+
   // The state of the enumerator. Notice that the instruction writes to the
   // storage
   // variables just like Load/Store instructions write to stack allocations.
@@ -458,6 +480,9 @@ void ESTreeIRGen::genForInStatement(ESTree::ForInStatementNode *ForInStmt) {
 }
 
 void ESTreeIRGen::genForOfStatement(ESTree::ForOfStatementNode *forOfStmt) {
+  NameTableScopeTy nameScope{nameTable_};
+  declareLexicalScope(forOfStmt->getLexicalScope());
+
   auto *function = Builder.getInsertionBlock()->getParent();
   auto *getNextBlock = Builder.createBasicBlock(function);
   auto *bodyBlock = Builder.createBasicBlock(function);
@@ -600,6 +625,9 @@ void ESTreeIRGen::genSwitchStatement(ESTree::SwitchStatementNode *switchStmt) {
   // The discriminator expression.
   Value *discr = genExpression(switchStmt->_discriminant);
 
+  NameTableScopeTy nameScope{nameTable_};
+  declareLexicalScope(switchStmt->getLexicalScope());
+
   // Sequentially allocate a basic block for each case, compare the discriminant
   // against the case value and conditionally jump to the basic block.
   int caseIndex = -1; // running index of the case's basic block.
@@ -661,6 +689,10 @@ void ESTreeIRGen::genConstSwitchStmt(
 
   // The discriminator expression.
   Value *discr = genExpression(switchStmt->_discriminant);
+
+  NameTableScopeTy nameScope{nameTable_};
+  declareLexicalScope(switchStmt->getLexicalScope());
+
   // Save the block where we will insert the switch instruction.
   auto *startBlock = Builder.getInsertionBlock();
 

@@ -151,6 +151,28 @@ BLACK_LIST = [
     "test262/test/language/literals/regexp/early-err-pattern.js",
     "test262/test/annexB/language/statements/for-in/strict-initializer.js",
     "test262/test/language/statements/try/early-catch-var.js",
+    # Restructuring in catch
+    "test262/test/language/statements/try/scope-catch-block-lex-open.js",
+    # Lexical capture in catch
+    "test262/test/language/statements/try/scope-catch-block-lex-close.js",
+    # Lexical capture in loop
+    "test262/test/language/statements/for/scope-body-lex-open.js",
+    "test262/test/language/statements/for/scope-body-lex-boundary.js",
+    "test262/test/language/statements/for-in/scope-body-lex-boundary.js",
+    "test262/test/language/statements/for-in/scope-body-lex-open.js",
+    "test262/test/language/statements/for-in/scope-head-lex-close.js",
+    "test262/test/language/statements/for-in/scope-head-lex-open.js",
+    "test262/test/language/statements/for-of/scope-body-lex-boundary.js",
+    "test262/test/language/statements/for-of/scope-body-lex-open.js",
+    "test262/test/language/statements/for-of/scope-head-lex-close.js",
+    "test262/test/language/statements/for-of/scope-head-lex-open.js",
+    "test262/test/language/statements/let/syntax/let-closure-inside-initialization.js",
+    "test262/test/language/statements/let/syntax/let-closure-inside-condition.js",
+    "test262/test/language/statements/let/syntax/let-closure-inside-next-expression.js",
+    "test262/test/language/statements/let/syntax/let-iteration-variable-is-freshly-allocated-for-each-iteration-single-let-binding.js",
+    "test262/test/language/statements/let/syntax/let-iteration-variable-is-freshly-allocated-for-each-iteration-multi-let-binding.js",
+    # Escaped let.
+    "test262/test/language/statements/let/syntax/escaped-let.js",
     # Unsupported test262 features
     "test262/test/language/statements/do-while/let-array-with-newline.js",
     "test262/test/language/statements/for-await-of/let-array-with-newline.js",
@@ -203,7 +225,6 @@ BLACK_LIST = [
     "test262/test/language/statements/async-function/",
     "test262/test/language/statements/async-generator/",
     "test262/test/language/statements/class/",
-    "test262/test/language/statements/let/",
     # Unsupported mjsunit features
     "mjsunit/arguments.js",
     "mjsunit/es6/array-copywithin.js",
@@ -1637,7 +1658,6 @@ UNSUPPORTED_FEATURES = [
     "FinalizationGroup",
     "hashbang",
     "json-superset",
-    "let",
     "new.target",
     "numeric-separator-literal",
     "optional-catch-binding",

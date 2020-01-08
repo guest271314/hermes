@@ -129,5 +129,12 @@ bool hasSimpleParams(FunctionLikeNode *node) {
   return true;
 }
 
+bool isLazyFunction(FunctionLikeNode *node) {
+  if (auto *block = dyn_cast<BlockStatementNode>(getBody(node))) {
+    return block->isLazyFunctionBody;
+  }
+  return false;
+}
+
 } // namespace ESTree
 } // namespace hermes

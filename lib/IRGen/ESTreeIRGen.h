@@ -24,11 +24,12 @@ using llvm::dyn_cast_or_null;
 namespace hermes {
 namespace irgen {
 
+using sem::Decl;
+using sem::LexicalScope;
+
 // Forward declarations
 class SurroundingTry;
 class ESTreeIRGen;
-
-using VarDecl = sem::FunctionInfo::VarDecl;
 
 //===----------------------------------------------------------------------===//
 // Free standing helpers.
@@ -333,14 +334,14 @@ class ESTreeIRGen {
 
   using BasicBlockListType = llvm::SmallVector<BasicBlock *, 4>;
 
+  /// The semantic context.
+  sem::SemContext &semCtx_;
   /// The module we are constructing.
   Module *Mod;
   /// The IRBuilder we use to construct the module.
   IRBuilder Builder;
   /// The root of the ESTree.
   ESTree::Node *Root;
-  /// This is a list of parsed global property declaration files.
-  const DeclarationFileListTy &DeclarationFileList;
   /// This points to the context of the top-level function, which we
   /// occasionally need.
   FunctionContext *topLevelContext{};
@@ -379,8 +380,8 @@ class ESTreeIRGen {
  public:
   explicit ESTreeIRGen(
       ESTree::Node *root,
-      const DeclarationFileListTy &declFileList,
       Module *M,
+      sem::SemContext &semCtx,
       const ScopeChain &scopeChain);
 
   /// Perform IRGeneration for the whole module.
@@ -417,6 +418,9 @@ class ESTreeIRGen {
   /// Generate code for the statement \p Stmt.
   void genStatement(ESTree::Node *stmt);
 
+  /// Generate code for a block statement.
+  void genBlockStatement(ESTree::BlockStatementNode *block);
+
   /// Wrapper of genExpression. If curFunction()->globalReturnRegister is
   /// set, stores the expression value into it.
   void genExpressionWrapper(ESTree::Node *expr);
@@ -428,6 +432,7 @@ class ESTreeIRGen {
 
   void genIfStatement(ESTree::IfStatementNode *IfStmt);
   void genReturnStatement(ESTree::ReturnStatementNode *RetStmt);
+  void genForStatement(ESTree::ForStatementNode *forStmt);
   void genForInStatement(ESTree::ForInStatementNode *ForInStmt);
   void genForOfStatement(ESTree::ForOfStatementNode *forOfStmt);
 
@@ -766,22 +771,35 @@ class ESTreeIRGen {
     return functionContext_;
   }
 
-  /// Declare a variable or a global propery depending in function \p inFunc,
+  /// Declare a variable or a global property in function \p inFunc,
   /// depending on whether it is the global scope. Do nothing if the variable
   /// or property is already declared in that scope.
   /// \return A pair. pair.first is the variable, and pair.second is set to true
   ///   if it was declared, false if it already existed.
   std::pair<Value *, bool> declareVariableOrGlobalProperty(
       Function *inFunc,
-      VarDecl::Kind declKind,
+      Decl::Kind declKind,
       Identifier name);
 
-  /// Declare a new ambient global property, if not already declared.
-  GlobalObjectProperty *declareAmbientGlobalProperty(Identifier name);
+  /// Declare a new local variable in function \p inFunc by creating a new
+  /// IR Variable and inserting it in the name table.
+  /// \return the new IR variable.
+  Variable *declareNewLocalVariable(
+      Function *inFunc,
+      Decl::Kind declKind,
+      Identifier name);
 
-  /// Scan all the global declarations in the supplied declaration file and
-  /// declare them as global properties.
-  void processDeclarationFile(ESTree::ProgramNode *programNode);
+  /// Create new local variables and insert them in the name table for all
+  /// declarations in the specified lexical scope.
+  void declareLexicalScope(LexicalScope *lexicalScope);
+
+  /// Declare a new global property, if not already declared.
+  GlobalObjectProperty *declareGlobalProperty(
+      Decl::Kind declKind,
+      Identifier name);
+
+  /// Import all global declarations from the context into the name table.
+  void declareGlobals();
 
   /// This method ensures that a variable with the name \p name exists in the
   /// current scope. The method reports an error if the variable does not exist

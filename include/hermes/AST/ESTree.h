@@ -27,6 +27,8 @@ using llvm::StringRef;
 
 namespace sem {
 class FunctionInfo;
+class LexicalScope;
+class Decl;
 } // namespace sem
 
 namespace ESTree {
@@ -228,9 +230,26 @@ inline Strictness makeStrictness(bool strictMode) {
 }
 
 class ScopeDecorationBase {
+  sem::LexicalScope *lexicalScope_{};
+
  public:
   /// List of all declarations in this scope.
   ASTList decls{};
+
+  void setLexicalScope(sem::LexicalScope *lexicalScope) {
+    assert(lexicalScope && "setting lexical scope to null");
+    assert(!lexicalScope_ && "lexical scope is already set");
+    lexicalScope_ = lexicalScope;
+  }
+
+  sem::LexicalScope *getLexicalScope() const {
+    assert(lexicalScope_ && "lexical scope is not set!");
+    return lexicalScope_;
+  }
+
+  sem::LexicalScope *getOptionalLexicalScope() const {
+    return lexicalScope_;
+  }
 };
 
 /// Decoration for all function-like nodes.
@@ -329,6 +348,11 @@ class CoverDecoration {};
 class CallExpressionLikeDecoration {};
 class MemberExpressionLikeDecoration {};
 
+class IdentifierDecoration {
+ public:
+  sem::Decl *decl = nullptr;
+};
+
 namespace detail {
 /// We need to to be able customize some ESTree types when passing them through
 /// a constructor, so we create a simple template type mapper. Specifically, a
@@ -391,6 +415,10 @@ struct DecoratorTrait<LabeledStatementNode> {
 template <>
 struct DecoratorTrait<ProgramNode> {
   using Type = ProgramDecoration;
+};
+template <>
+struct DecoratorTrait<IdentifierNode> {
+  using Type = IdentifierDecoration;
 };
 
 } // namespace detail
@@ -691,6 +719,9 @@ NodeList &getArguments(CallExpressionLikeNode *node);
 /// \return true when \p node has simple params, i.e. no destructuring and no
 /// initializers.
 bool hasSimpleParams(FunctionLikeNode *node);
+
+/// \return true when \p node has a lazy body.
+bool isLazyFunction(FunctionLikeNode *node);
 
 } // namespace ESTree
 } // namespace hermes

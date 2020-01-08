@@ -15,13 +15,16 @@ function f1() {
 //CHECK: {{.*}}directives-3.js:14:6: error: 'delete' of a variable is not allowed in strict mode
 //CHECK-NEXT:      delete x;
 //CHECK-NEXT:      ^~~~~~~~
+//CHECK: {{.*}}directives-3.js:14:13: warning: the variable "x" was not declared in function "f1"
+//CHECK-NEXT:      delete x;
+//CHECK-NEXT:             ^
 
 }
 
 function f2() {
     "use strict" /* comment */ ;
      delete x;
-//CHECK: {{.*}}directives-3.js:23:6: error: 'delete' of a variable is not allowed in strict mode
+//CHECK: {{.*}}directives-3.js:26:6: error: 'delete' of a variable is not allowed in strict mode
 //CHECK-NEXT:      delete x;
 //CHECK-NEXT:      ^~~~~~~~
 
@@ -30,14 +33,14 @@ function f2() {
 function f3() {
     "use strict" /* comment */
      delete x;
-//CHECK: {{.*}}directives-3.js:32:6: error: 'delete' of a variable is not allowed in strict mode
+//CHECK: {{.*}}directives-3.js:35:6: error: 'delete' of a variable is not allowed in strict mode
 //CHECK-NEXT:      delete x;
 //CHECK-NEXT:      ^~~~~~~~
 
 }
 
 function f4(eval) {
-//CHECK: {{.*}}directives-3.js:39:13: error: cannot declare 'eval'
+//CHECK: {{.*}}directives-3.js:42:13: error: cannot declare 'eval' in strict mode
 //CHECK-NEXT: function f4(eval) {
 //CHECK-NEXT:             ^~~~
 
@@ -45,6 +48,6 @@ function f4(eval) {
 }
 
 function f5(eval) {"use strict"  }
-//CHECK: {{.*}}directives-3.js:47:13: error: cannot declare 'eval'
+//CHECK: {{.*}}directives-3.js:50:13: error: cannot declare 'eval' in strict mode
 //CHECK-NEXT: function f5(eval) {"use strict"  }
 //CHECK-NEXT:             ^~~~

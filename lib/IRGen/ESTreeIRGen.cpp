@@ -40,6 +40,11 @@ Instruction *emitLoad(IRBuilder &builder, Value *from, bool inhibitThrow) {
 Instruction *
 emitStore(IRBuilder &builder, Value *storedValue, Value *ptr, bool declInit) {
   if (auto *var = dyn_cast<Variable>(ptr)) {
+    if (!declInit && var->isDeclReadOnly()) {
+      // If this variable is read-only, we either have already reported an
+      // error, or we must ignore the right. Just return something non-null.
+      return builder.createAsNumberInst(builder.getLiteralPositiveZero());
+    }
     if (!declInit && Variable::declKindNeedsTDZ(var->getDeclKind()) &&
         var->getRelatedVariable()) {
       // Must verify whether the variable is initialized.
@@ -149,13 +154,13 @@ GlobalObjectProperty *LReference::castAsGlobalObjectProperty() const {
 
 ESTreeIRGen::ESTreeIRGen(
     ESTree::Node *root,
-    const DeclarationFileListTy &declFileList,
     Module *M,
+    sem::SemContext &semCtx,
     const ScopeChain &scopeChain)
-    : Mod(M),
+    : semCtx_(semCtx),
+      Mod(M),
       Builder(Mod),
       Root(root),
-      DeclarationFileList(declFileList),
       lexicalScopeChain(resolveScopeIdentifiers(scopeChain)),
       identEval_(Builder.createIdentifier("eval")),
       identLet_(Builder.createIdentifier("let")),
@@ -234,9 +239,7 @@ void ESTreeIRGen::doIt() {
   // Now declare all externally supplied global properties, but only if we don't
   // have a lexical scope chain.
   if (!lexicalScopeChain) {
-    for (auto declFile : DeclarationFileList) {
-      processDeclarationFile(declFile);
-    }
+    declareGlobals();
   }
 
   emitFunctionPrologue(
@@ -280,9 +283,7 @@ void ESTreeIRGen::doCJSModule(
   assert(
       !lexicalScopeChain &&
       "Lexical scope chain not supported for CJS modules");
-  for (auto declFile : DeclarationFileList) {
-    processDeclarationFile(declFile);
-  }
+  declareGlobals();
 
   Identifier functionName = Builder.createIdentifier("cjs_module");
   Function *newFunc = genES5Function(functionName, nullptr, func);
@@ -356,7 +357,7 @@ std::pair<Function *, Function *> ESTreeIRGen::doLazyFunction(
 
 std::pair<Value *, bool> ESTreeIRGen::declareVariableOrGlobalProperty(
     Function *inFunc,
-    VarDecl::Kind declKind,
+    Decl::Kind declKind,
     Identifier name) {
   Value *found = nameTable_.lookup(name);
 
@@ -377,36 +378,13 @@ std::pair<Value *, bool> ESTreeIRGen::declareVariableOrGlobalProperty(
 
   // Create a property if global scope, variable otherwise.
   Value *res;
-  if (inFunc->isGlobalScope() && declKind == VarDecl::Kind::Var) {
-    res = Builder.createGlobalObjectProperty(name, true);
+  if (Decl::isKindGlobal(declKind)) {
+    res = Builder.createGlobalObjectProperty(
+        name, declKind != Decl::Kind::UndeclaredGlobalProperty);
+    // Register the variable in the scoped hash table.
+    nameTable_.insert(name, res);
   } else {
-    Variable::DeclKind vdc;
-    if (declKind == VarDecl::Kind::Let)
-      vdc = Variable::DeclKind::Let;
-    else if (declKind == VarDecl::Kind::Const)
-      vdc = Variable::DeclKind::Const;
-    else {
-      assert(declKind == VarDecl::Kind::Var);
-      vdc = Variable::DeclKind::Var;
-    }
-
-    auto *var = Builder.createVariable(inFunc->getFunctionScope(), vdc, name);
-
-    // For "let" and "const" create the related TDZ flag.
-    if (Variable::declKindNeedsTDZ(vdc) &&
-        Mod->getContext().getCodeGenerationSettings().enableTDZ) {
-      llvm::SmallString<32> strBuf{"tdz$"};
-      strBuf.append(name.str());
-
-      auto *related = Builder.createVariable(
-          var->getParent(),
-          Variable::DeclKind::Var,
-          genAnonymousLabelName(strBuf));
-      var->setRelatedVariable(related);
-      related->setRelatedVariable(var);
-    }
-
-    res = var;
+    res = declareNewLocalVariable(inFunc, declKind, name);
   }
 
   // Register the variable in the scoped hash table.
@@ -414,8 +392,78 @@ std::pair<Value *, bool> ESTreeIRGen::declareVariableOrGlobalProperty(
   return {res, true};
 }
 
-GlobalObjectProperty *ESTreeIRGen::declareAmbientGlobalProperty(
+Variable *ESTreeIRGen::declareNewLocalVariable(
+    hermes::Function *inFunc,
+    hermes::sem::Decl::Kind declKind,
+    hermes::Identifier name) {
+  assert(
+      !Decl::isKindGlobal(declKind) &&
+      "cannot declare a global property as local variable");
+
+  Variable::DeclKind vdc;
+  if (declKind == Decl::Kind::Let)
+    vdc = Variable::DeclKind::Let;
+  else if (declKind == Decl::Kind::Const)
+    vdc = Variable::DeclKind::Const;
+  else if (declKind == Decl::Kind::FunctionExprName)
+    vdc = Variable::DeclKind::FunctionExprName;
+  else {
+    vdc = Variable::DeclKind::Var;
+  }
+
+  auto *var = Builder.createVariable(inFunc->getFunctionScope(), vdc, name);
+
+  // For "let" and "const" create the related TDZ flag.
+  if (Variable::declKindNeedsTDZ(vdc) &&
+      Mod->getContext().getCodeGenerationSettings().enableTDZ) {
+    llvm::SmallString<32> strBuf{"tdz$"};
+    strBuf.append(name.str());
+
+    auto *related = Builder.createVariable(
+        var->getParent(),
+        Variable::DeclKind::Var,
+        genAnonymousLabelName(strBuf));
+    var->setRelatedVariable(related);
+    related->setRelatedVariable(var);
+  }
+
+  // Register the variable in the scoped hash table.
+  nameTable_.insert(name, var);
+
+  return var;
+}
+
+void ESTreeIRGen::declareLexicalScope(LexicalScope *lexicalScope) {
+  for (auto *decl : lexicalScope->decls) {
+    assert(
+        !Decl::isKindVarLike(decl->kind) &&
+        "scope declarations cannot be function scoped");
+
+    auto *var = declareNewLocalVariable(
+        functionContext_->function, decl->kind, decl->name);
+    // Initialize it.
+    if (decl->functionInScope)
+      continue;
+
+    Builder.createStoreFrameInst(Builder.getLiteralUndefined(), var);
+    if (var->getRelatedVariable()) {
+      Builder.createStoreFrameInst(
+          Builder.getLiteralUndefined(), var->getRelatedVariable());
+    }
+  }
+  // Generate and initialize the code for the hoisted function declarations
+  // before generating the rest of the body.
+  for (auto funcDecl : lexicalScope->hoistedFunctions) {
+    genFunctionDeclaration(funcDecl);
+  }
+}
+
+GlobalObjectProperty *ESTreeIRGen::declareGlobalProperty(
+    Decl::Kind declKind,
     Identifier name) {
+  assert(
+      Decl::isKindGlobal(declKind) &&
+      "global property must have a global kind");
   // Avoid redefining global properties.
   auto *prop = dyn_cast_or_null<GlobalObjectProperty>(nameTable_.lookup(name));
   if (prop)
@@ -425,24 +473,17 @@ GlobalObjectProperty *ESTreeIRGen::declareAmbientGlobalProperty(
       llvm::dbgs() << "declaring ambient global property " << name << " "
                    << name.getUnderlyingPointer() << "\n");
 
-  prop = Builder.createGlobalObjectProperty(name, false);
+  // Register the variable in the scoped hash table.
+  prop = Builder.createGlobalObjectProperty(
+      name, declKind != Decl::Kind::UndeclaredGlobalProperty);
   nameTable_.insertIntoScope(&topLevelContext->scope, name, prop);
   return prop;
 }
 
-void ESTreeIRGen::processDeclarationFile(ESTree::ProgramNode *programNode) {
-  auto Program = dyn_cast_or_null<ESTree::ProgramNode>(programNode);
-  if (!Program)
-    return;
-
-  ESTree::ES5FindDecls DH;
-  Program->visit(DH);
-
-  // Create variable declarations for each of the hoisted variables.
-  for (auto vd : DH.decls)
-    declareAmbientGlobalProperty(getNameFieldFromID(vd->_id));
-  for (auto fd : DH.closures)
-    declareAmbientGlobalProperty(getNameFieldFromID(fd->_id));
+void ESTreeIRGen::declareGlobals() {
+  for (auto &decl : semCtx_.getGlobals()) {
+    declareGlobalProperty(decl.kind, decl.name);
+  }
 }
 
 Value *ESTreeIRGen::ensureVariableExists(ESTree::IdentifierNode *id) {
@@ -453,20 +494,8 @@ Value *ESTreeIRGen::ensureVariableExists(ESTree::IdentifierNode *id) {
   if (auto *var = nameTable_.lookup(name))
     return var;
 
-  if (curFunction()->function->isStrictMode()) {
-    // Report a warning in strict mode.
-    auto currentFunc = Builder.getInsertionBlock()->getParent();
-
-    Builder.getModule()->getContext().getSourceErrorManager().warning(
-        Warning::UndefinedVariable,
-        id->getSourceRange(),
-        Twine("the variable \"") + name.str() +
-            "\" was not declared in function \"" +
-            currentFunc->getInternalNameStr() + "\"");
-  }
-
   // Undeclared variable is an ambient global property.
-  return declareAmbientGlobalProperty(name);
+  return declareGlobalProperty(Decl::Kind::UndeclaredGlobalProperty, name);
 }
 
 Value *ESTreeIRGen::genMemberExpressionProperty(

@@ -21,7 +21,9 @@ class Node;
 using NodePtr = Node *;
 } // namespace ESTree
 
-using DeclarationFileListTy = std::vector<ESTree::ProgramNode *>;
+namespace sem {
+class SemContext;
+}
 
 namespace hbc {
 
@@ -54,13 +56,12 @@ struct LazyCompilationData {
 } // namespace hbc
 
 /// Lowers an ESTree program into Hermes IR in \p M.
-/// \param declFileList a list of parsed global property definition files.
 /// \param scopeChain identifiers in the environment, if compiling for local
 /// eval. \returns True if an error occured and a message was emitted.
 bool generateIRFromESTree(
     ESTree::NodePtr node,
     Module *M,
-    const DeclarationFileListTy &declFileList,
+    sem::SemContext &semCtx,
     const ScopeChain &scopeChain);
 
 /// Lowers an ESTree program into Hermes IR in \p M without a top-level
@@ -74,7 +75,7 @@ void generateIRForCJSModule(
     llvm::StringRef filename,
     Module *M,
     Function *topLevelFunction,
-    const DeclarationFileListTy &declFileList);
+    sem::SemContext &semCtx);
 
 /// Generate IR from the AST of a previously pre-parsed "lazy" function by
 /// parsing it again and validating it. On error, a stub function which throws

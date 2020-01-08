@@ -1332,7 +1332,7 @@ bool generateIRForSourcesAsCJSModules(
   auto globalMemBuffer = llvm::MemoryBuffer::getMemBufferCopy("", "<global>");
 
   auto *globalAST = parseJS(context, semCtx, std::move(globalMemBuffer));
-  generateIRFromESTree(globalAST, &M, declFileList, {});
+  generateIRFromESTree(globalAST, &M, semCtx, {});
 
   std::vector<std::unique_ptr<SourceMap>> inputSourceMaps{};
   inputSourceMaps.push_back(nullptr);
@@ -1365,7 +1365,7 @@ bool generateIRForSourcesAsCJSModules(
           llvm::sys::path::remove_leading_dotslash(filename),
           &M,
           topLevelFunction,
-          declFileList);
+          semCtx);
       if (moduleInSegment.sourceMap) {
         auto inputMap = SourceMapParser::parse(*moduleInSegment.sourceMap);
         if (!inputMap) {
@@ -1591,7 +1591,7 @@ CompileResult processSourceFiles(
   }
 
   Module M(context);
-  sem::SemContext semCtx{};
+  sem::SemContext semCtx{*context, declFileList};
 
   if (context->getUseCJSModules()) {
     // Allow the IR generation function to populate inputSourceMaps to ensure
@@ -1633,7 +1633,7 @@ CompileResult processSourceFiles(
     if (!ast) {
       return ParsingFailed;
     }
-    generateIRFromESTree(ast, &M, declFileList, {});
+    generateIRFromESTree(ast, &M, semCtx, {});
   }
 
   // Bail out if there were any errors. We can't ensure that the module is in

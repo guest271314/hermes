@@ -35,7 +35,8 @@ std::vector<uint8_t> hermes::bytecodeForSource(
   parser::JSParser jsParser(*context, source);
   auto parsed = jsParser.parse();
   assert(parsed.hasValue() && "Failed to parse source");
-  sem::SemContext semCtx{};
+  DeclarationFileListTy declFileList;
+  sem::SemContext semCtx{*context, declFileList};
   auto validated = validateAST(*context, semCtx, *parsed, true);
   (void)validated;
   assert(validated && "Failed to validate source");
@@ -43,8 +44,7 @@ std::vector<uint8_t> hermes::bytecodeForSource(
 
   /* Generate IR */
   Module M(context);
-  DeclarationFileListTy declFileList;
-  hermes::generateIRFromESTree(ast, &M, declFileList, {});
+  hermes::generateIRFromESTree(ast, &M, semCtx, {});
 
   /* Generate bytecode module */
   auto bytecodeGenOpts = BytecodeGenerationOptions::defaults();

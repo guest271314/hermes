@@ -37,8 +37,9 @@ std::pair<std::string, std::string> genSplitCode(
       codeGenOpts, optimizationOpts, nullptr, ranges);
   context->setUseCJSModules(true);
 
+  ::hermes::DeclarationFileListTy declFileList;
   hermes::Module M(context);
-  hermes::sem::SemContext semCtx{};
+  hermes::sem::SemContext semCtx{*context, declFileList};
 
   auto parseJS = [&](std::unique_ptr<llvm::MemoryBuffer> fileBuf,
                      bool wrapCJSModule = false) -> hermes::ESTree::NodePtr {
@@ -56,11 +57,9 @@ std::pair<std::string, std::string> genSplitCode(
     }
   };
 
-  ::hermes::DeclarationFileListTy declFileList;
-
   auto globalMemBuffer = llvm::MemoryBuffer::getMemBufferCopy("", "<global>");
   auto *globalAST = parseJS(std::move(globalMemBuffer));
-  generateIRFromESTree(globalAST, &M, declFileList, {});
+  generateIRFromESTree(globalAST, &M, semCtx, {});
   auto *topLevelFunction = M.getTopLevelFunction();
 
   auto genModule = [&](uint32_t id,
@@ -73,7 +72,7 @@ std::pair<std::string, std::string> genSplitCode(
         filename,
         &M,
         topLevelFunction,
-        declFileList);
+        semCtx);
   };
 
   genModule(0, llvm::MemoryBuffer::getMemBufferCopy(mainCode, "main.js"));

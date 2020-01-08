@@ -11,6 +11,7 @@ add_llvm_library(hermesAST
     RecursiveVisitor.h
     SemValidate.cpp
     SemanticValidator.cpp SemanticValidator.h
+    ValidatorHelpers.cpp ValidatorHelpers.h
     CommonJS.cpp
     LINK_LIBS
     hermesSupport
