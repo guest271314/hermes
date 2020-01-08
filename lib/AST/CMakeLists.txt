@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 add_llvm_library(hermesAST
+    ASTList.cpp
     ASTBuilder.cpp
     ESTree.cpp
     ESTreeJSONDumper.cpp

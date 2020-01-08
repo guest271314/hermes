@@ -8,6 +8,7 @@ set(LLVM_LINK_COMPONENTS
   )
 
 set(ASTSources
+  ASTListTest.cpp
   JSONTest.cpp
   ESTreeTest.cpp
   ValidatorTest.cpp
