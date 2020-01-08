@@ -661,6 +661,9 @@ void ESTreeVisit(Visitor &V, NodePtr Node) {
   }
 }
 
+/// \return the identifier node of a FunctionLike node
+Node *getIdentifier(FunctionLikeNode *node);
+
 /// Return a reference to the parameter list of a FunctionLikeNode.
 NodeList &getParams(FunctionLikeNode *node);
 
@@ -668,7 +671,7 @@ NodeList &getParams(FunctionLikeNode *node);
 /// otherwise return nullptr.
 /// ProgramNode doesn't have a block statement body, as well as some arrow
 /// functions.
-BlockStatementNode *getBlockStatement(FunctionLikeNode *node);
+Node *getBody(FunctionLikeNode *node);
 
 /// \return the object of the member expression node.
 Node *getObject(MemberExpressionLikeNode *node);

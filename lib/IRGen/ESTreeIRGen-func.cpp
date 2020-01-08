@@ -170,7 +170,7 @@ Function *ESTreeIRGen::genES5Function(
     bool isGeneratorInnerFunction) {
   assert(functionNode && "Function AST cannot be null");
 
-  auto *body = ESTree::getBlockStatement(functionNode);
+  auto *body = ESTree::getBody(functionNode);
   assert(body && "body of ES5 function cannot be null");
 
   Function *newFunction = isGeneratorInnerFunction

@@ -15,6 +15,21 @@ using llvm::isa;
 namespace hermes {
 namespace ESTree {
 
+Node *getIdentifier(FunctionLikeNode *node) {
+  switch (node->getKind()) {
+    default:
+      assert(
+          node->getKind() == NodeKind::Program && "invalid FunctionLikeNode");
+      return nullptr;
+    case NodeKind::FunctionExpression:
+      return cast<FunctionExpressionNode>(node)->_id;
+    case NodeKind::ArrowFunctionExpression:
+      return cast<ArrowFunctionExpressionNode>(node)->_id;
+    case NodeKind::FunctionDeclaration:
+      return cast<FunctionDeclarationNode>(node)->_id;
+  }
+}
+
 NodeList &getParams(FunctionLikeNode *node) {
   switch (node->getKind()) {
     default:
@@ -30,21 +45,18 @@ NodeList &getParams(FunctionLikeNode *node) {
   }
 }
 
-BlockStatementNode *getBlockStatement(FunctionLikeNode *node) {
+Node *getBody(FunctionLikeNode *node) {
   switch (node->getKind()) {
     default:
       assert(
           node->getKind() == NodeKind::Program && "invalid FunctionLikeNode");
       return nullptr;
     case NodeKind::FunctionExpression:
-      return cast<BlockStatementNode>(
-          cast<FunctionExpressionNode>(node)->_body);
-    case NodeKind::FunctionDeclaration:
-      return cast<BlockStatementNode>(
-          cast<FunctionDeclarationNode>(node)->_body);
+      return cast<FunctionExpressionNode>(node)->_body;
     case NodeKind::ArrowFunctionExpression: {
-      return dyn_cast<BlockStatementNode>(
-          cast<FunctionDeclarationNode>(node)->_body);
+      return cast<ArrowFunctionExpressionNode>(node)->_body;
+      case NodeKind::FunctionDeclaration:
+        return cast<FunctionDeclarationNode>(node)->_body;
     }
   }
 }

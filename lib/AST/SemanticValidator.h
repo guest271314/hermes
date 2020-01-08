@@ -216,10 +216,6 @@ class SemanticValidator {
 
   /// Get the LabelDecorationBase depending on the node type.
   static LabelDecorationBase *getLabelDecorationBase(StatementNode *node);
-
-  /// Visit the parameters and body of \p node, setting isFormalParams_
-  /// correctly.
-  void visitParamsAndBody(FunctionLikeNode *node);
 };
 
 //===----------------------------------------------------------------------===//

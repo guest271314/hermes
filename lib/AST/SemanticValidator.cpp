@@ -635,45 +635,13 @@ void SemanticValidator::visitFunction(
     }
   }
 
-  visitParamsAndBody(node);
-}
-
-void SemanticValidator::visitParamsAndBody(FunctionLikeNode *node) {
-  switch (node->getKind()) {
-    case NodeKind::FunctionExpression: {
-      auto *fe = cast<ESTree::FunctionExpressionNode>(node);
-      visitESTreeNode(*this, fe->_id, fe);
-      for (auto &param : fe->_params) {
-        llvm::SaveAndRestore<bool> oldIsFormalParams{isFormalParams_, true};
-        visitESTreeNode(*this, &param, fe);
-      }
-      visitESTreeNode(*this, fe->_body, fe);
-      break;
-    }
-    case NodeKind::ArrowFunctionExpression: {
-      auto *fe = cast<ESTree::ArrowFunctionExpressionNode>(node);
-      visitESTreeNode(*this, fe->_id, fe);
-      for (auto &param : fe->_params) {
-        llvm::SaveAndRestore<bool> oldIsFormalParams{isFormalParams_, true};
-        visitESTreeNode(*this, &param, fe);
-      }
-      visitESTreeNode(*this, fe->_body, fe);
-      break;
-    }
-    case NodeKind::FunctionDeclaration: {
-      auto *fe = cast<ESTree::FunctionDeclarationNode>(node);
-      visitESTreeNode(*this, fe->_id, fe);
-      for (auto &param : fe->_params) {
-        llvm::SaveAndRestore<bool> oldIsFormalParams{isFormalParams_, true};
-        visitESTreeNode(*this, &param, fe);
-      }
-      visitESTreeNode(*this, fe->_body, fe);
-      visitESTreeNode(*this, fe->_returnType, fe);
-      break;
-    }
-    default:
-      visitESTreeChildren(*this, node);
+  visitESTreeNode(*this, getIdentifier(node), node);
+  {
+    llvm::SaveAndRestore<bool> oldIsFormalParams{isFormalParams_, true};
+    for (auto &param : getParams(node))
+      visitESTreeNode(*this, &param, node);
   }
+  visitESTreeNode(*this, getBody(node), node);
 }
 
 Node *SemanticValidator::scanDirectivePrologue(NodeList &body) {
