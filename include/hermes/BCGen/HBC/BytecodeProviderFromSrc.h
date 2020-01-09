@@ -38,12 +38,13 @@ struct CompileFlags {
   bool includeLibHermes{true};
 };
 
-// The minimum code size in bytes before enabling lazy compilation.
-// Lazy compilation has significant per-module overhead, and is best applied
-// to large bundles with a lot of unused code. Eager compilation is more
-// efficient when compiling many small bundles with little unused code, such as
-// when the API user loads smaller chunks of JS code on demand.
-static constexpr unsigned kDefaultSizeThresholdForLazyCompilation = 1 << 16;
+/// The minimum code size in bytes of a compilation unit before enabling lazy
+/// compilation.
+/// Lazy compilation has significant per-module overhead, and is best applied
+/// to large bundles with a lot of unused code. Eager compilation is more
+/// efficient when compiling many small bundles with little unused code, such as
+/// when the API user loads smaller chunks of JS code on demand.
+extern unsigned kDefaultSizeThresholdForLazyCompilation;
 
 #ifndef HERMESVM_LEAN
 /// BCProviderFromSrc is used when we are construction the bytecode from

@@ -28,6 +28,14 @@ using hermes::vm::Serializer;
 namespace hermes {
 namespace hbc {
 
+/// The minimum code size in bytes of a compilation unit before enabling lazy
+/// compilation.
+/// Lazy compilation has significant per-module overhead, and is best applied
+/// to large bundles with a lot of unused code. Eager compilation is more
+/// efficient when compiling many small bundles with little unused code, such as
+/// when the API user loads smaller chunks of JS code on demand.
+unsigned kDefaultSizeThresholdForLazyCompilation = 1u << 16;
+
 #ifndef HERMESVM_LEAN
 namespace {
 bool isSingleFunctionExpression(ESTree::NodePtr ast) {

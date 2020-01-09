@@ -19,10 +19,6 @@ namespace hermes {
 namespace parser {
 namespace detail {
 
-// If a function's source code body is smaller than this number of bytes,
-// compile it immediately instead of creating a lazy stub.
-static const int PreemptiveCompilationThresholdBytes = 160;
-
 /// Declare a RAII recursion tracker. Check whether the recursion limit has
 /// been exceeded, and if so generate an error and return an empty
 /// llvm::Optional<>.
@@ -525,8 +521,8 @@ Optional<ESTree::BlockStatementNode *> JSParserImpl::parseFunctionBody(
     auto startLoc = tok_->getStartLoc();
     assert(preParsed_->bodyStartToEnd.count(startLoc) == 1);
     auto endLoc = preParsed_->bodyStartToEnd[startLoc];
-    if (endLoc.getPointer() - startLoc.getPointer() >
-        PreemptiveCompilationThresholdBytes) {
+    if ((size_t)(endLoc.getPointer() - startLoc.getPointer()) >
+        LazyFunctionThresholdBytes) {
       lexer_.seek(endLoc);
       advance();
 

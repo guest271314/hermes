@@ -16,6 +16,11 @@ using llvm::isa;
 namespace hermes {
 namespace parser {
 
+/// If a function's source code body is smaller than this number of bytes,
+/// parse it immediately instead of creating a lazy stub.
+/// Do not fool with this value except for testing.
+unsigned LazyFunctionThresholdBytes = 160;
+
 JSParser::JSParser(Context &context, std::unique_ptr<llvm::MemoryBuffer> input)
     : impl_(new detail::JSParserImpl(context, std::move(input))) {}
 

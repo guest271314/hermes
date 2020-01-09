@@ -88,6 +88,11 @@ class JSParser {
   std::unique_ptr<detail::JSParserImpl> const impl_;
 };
 
+/// If a function's source code body is smaller than this number of bytes,
+/// parse it immediately instead of creating a lazy stub.
+/// Do not fool with this value except for testing.
+extern unsigned LazyFunctionThresholdBytes;
+
 }; // namespace parser
 }; // namespace hermes
 

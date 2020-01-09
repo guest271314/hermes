@@ -520,6 +520,26 @@ static opt<unsigned> PadFunctionBodiesPercent(
     Hidden,
     cat(CompilerCategory));
 
+static opt<unsigned> LazyFunctionThreshold(
+    "Xlazy-function-threshold",
+    desc(
+        "In lazy mode, only source functions longer that this will be parsed lazily"),
+    Hidden,
+    cat(CompilerCategory));
+static opt<unsigned> LazyUnitThreshold(
+    "Xlazy-unit-threshold",
+    desc(
+        "In lazy mode, only source input longer that this will be compiled lazily"),
+    Hidden,
+    cat(CompilerCategory));
+static opt<bool> Lazy1(
+    "Xlazy1",
+    llvm::cl::ValueDisallowed,
+    init(false),
+    desc("Set all lazy compilation thresholds to 1"),
+    Hidden,
+    cat(CompilerCategory));
+
 } // namespace cl
 
 namespace {
@@ -912,6 +932,19 @@ bool validateFlags() {
 std::shared_ptr<Context> createContext(
     std::unique_ptr<Context::ResolutionTable> resolutionTable,
     std::vector<Context::SegmentRange> segmentRanges) {
+  if (cl::Lazy1) {
+    hermes::parser::LazyFunctionThresholdBytes = cl::LazyFunctionThreshold = 1;
+    hermes::hbc::kDefaultSizeThresholdForLazyCompilation = 1;
+  } else {
+    if (cl::LazyFunctionThreshold.getNumOccurrences()) {
+      hermes::parser::LazyFunctionThresholdBytes = cl::LazyFunctionThreshold;
+    }
+    if (cl::LazyUnitThreshold.getNumOccurrences()) {
+      hermes::hbc::kDefaultSizeThresholdForLazyCompilation =
+          cl::LazyUnitThreshold;
+    }
+  }
+
   CodeGenerationSettings codeGenOpts;
   codeGenOpts.enableTDZ = cl::EnableTDZ;
   codeGenOpts.dumpOperandRegisters = cl::DumpOperandRegisters;
