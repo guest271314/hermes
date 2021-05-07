@@ -1180,19 +1180,36 @@ tailCall:
       HermesValue::RawType callNewTarget;
 
 /// Handle an opcode \p name with an out-of-line implementation in a function
+///   ExecutionStatus func(
+///       Runtime *,
+///       PinnedHermesValue *frameRegs,
+///       Inst *ip,
+///       CodeBlock *curCodeBlock)
+#define CASE_OUTOFLINE_FULL(name, func)                                     \
+  CASE(name) {                                                              \
+    CAPTURE_IP_ASSIGN(auto st, func(runtime, frameRegs, ip, curCodeBlock)); \
+    if (LLVM_UNLIKELY(st == ExecutionStatus::EXCEPTION)) {                  \
+      goto exception;                                                       \
+    }                                                                       \
+    gcScope.flushToSmallCount(KEEP_HANDLES);                                \
+    ip = NEXTINST(name);                                                    \
+    DISPATCH;                                                               \
+  }
+
+/// Handle an opcode \p name with an out-of-line implementation in a function
 ///   ExecutionStatus caseName(
 ///       Runtime *,
 ///       PinnedHermesValue *frameRegs,
 ///       Inst *ip)
-#define CASE_OUTOFLINE(name)                                         \
-  CASE(name) {                                                       \
-    CAPTURE_IP_ASSIGN(auto res, case##name(runtime, frameRegs, ip)); \
-    if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION)) {          \
-      goto exception;                                                \
-    }                                                                \
-    gcScope.flushToSmallCount(KEEP_HANDLES);                         \
-    ip = NEXTINST(name);                                             \
-    DISPATCH;                                                        \
+#define CASE_OUTOFLINE(name)                                        \
+  CASE(name) {                                                      \
+    CAPTURE_IP_ASSIGN(auto st, case##name(runtime, frameRegs, ip)); \
+    if (LLVM_UNLIKELY(st == ExecutionStatus::EXCEPTION)) {          \
+      goto exception;                                               \
+    }                                                               \
+    gcScope.flushToSmallCount(KEEP_HANDLES);                        \
+    ip = NEXTINST(name);                                            \
+    DISPATCH;                                                       \
   }
 
 /// Implement a binary arithmetic instruction with a fast path where both
@@ -2102,7 +2119,7 @@ tailCall:
       }
 
       CASE(GetEnvironment) {
-        GCCell *curEnv = vmcast<GCCell>(O2REG(GetEnvironment));
+        auto *curEnv = vmcast<GCCell>(O2REG(GetEnvironment));
         for (unsigned level = ip->iGetEnvironment.op3; level; --level) {
           assert(curEnv && "invalid environment relative level");
           curEnv = vmcast<Environment>(curEnv)->getParentEnvironment(runtime);
@@ -2240,6 +2257,24 @@ tailCall:
         }
         gcScope.flushToSmallCount(KEEP_HANDLES);
         ip = NEXTINST(DeclareGlobalVar);
+        DISPATCH;
+      }
+
+      CASE_OUTOFLINE_FULL(GetDynamic, caseGetDynamic);
+      CASE_OUTOFLINE_FULL(TryGetDynamic, caseGetDynamic);
+      CASE_OUTOFLINE_FULL(PutDynamic, casePutDynamic);
+      CASE_OUTOFLINE_FULL(TryPutDynamic, casePutDynamic);
+      CASE(ReadOnlyProp) {
+        assert(
+            vmisa<LocalScope>(O1REG(ReadOnlyProp)) &&
+            "ReadOnlyProp can only be used with local object scopes");
+        CAPTURE_IP(JSObject::updateOwnPropertyToConst(
+            Handle<JSObject>::vmcast(&O1REG(ReadOnlyProp)),
+            runtime,
+            ID(ip->iReadOnlyProp.op2),
+            ip->iReadOnlyProp.op3));
+        gcScope.flushToSmallCount(KEEP_HANDLES);
+        ip = NEXTINST(ReadOnlyProp);
         DISPATCH;
       }
 
@@ -2969,6 +3004,17 @@ tailCall:
         DISPATCH;
       }
       CASE_OUTOFLINE(NewDynamicScope);
+
+      CASE(GetScopeParent) {
+        GCCell *curObj = vmcast<GCCell>(O2REG(GetScopeParent));
+        for (unsigned level = ip->iGetScopeParent.op3; level; --level) {
+          assert(curObj && "invalid environment relative level");
+          curObj = vmcast<LocalScope>(curObj)->getParentScope(runtime);
+        }
+        O1REG(GetScopeParent) = HermesValue::encodeObjectValue(curObj);
+        ip = NEXTINST(GetScopeParent);
+        DISPATCH;
+      }
 
       CASE(NewObjectWithBuffer) {
         CAPTURE_IP(

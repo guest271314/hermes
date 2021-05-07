@@ -98,7 +98,8 @@ DEFINE_OPCODE_2(NewObjectWithParent, Reg8, Reg8)
 /// valid.
 /// Arg1 = the created object
 /// Arg2 = the parent.
-DEFINE_OPCODE_2(NewStaticScope, Reg8, Reg8)
+/// Arg3 = number of variables hint
+DEFINE_OPCODE_3(NewStaticScope, Reg8, Reg8, UInt8)
 
 /// Create a new dynamic scope with an optional "with" object.
 /// Arg1 = the created object
@@ -106,6 +107,12 @@ DEFINE_OPCODE_2(NewStaticScope, Reg8, Reg8)
 /// Arg3 = the optional "with" object. If "empty" it is not used, otherwise
 ///     it ?ToObject(Arg3) is used as the parent.
 DEFINE_OPCODE_3(NewDynamicScope, Reg8, Reg8, Reg8)
+
+/// Obtain a scope's parent scope.
+/// Arg1 = the result
+/// Arg2 = the scope
+/// Arg3 = which parent to return. 0 is the object itself, 1 its parent, etc.
+DEFINE_OPCODE_3(GetScopeParent, Reg8, Reg8, UInt8)
 
 /// Create an array from a static list of values, as for var=[1,2,3].
 /// Any non-constant elements can be set afterwards with PutOwnByIndex.
@@ -259,6 +266,57 @@ DEFINE_OPCODE_3(CreateEnvironment, Reg8, Reg8, UInt16)
 /// The variable will be set to undefined.
 DEFINE_OPCODE_1(DeclareGlobalVar, UInt32)
 OPERAND_STRING_ID(DeclareGlobalVar, 1)
+
+/// Locate the object containing a property. If not found, return "undefined".
+/// Load the value. If it is empty, throw.
+/// Otherwise return the property from the object.
+/// Arg1 = the result
+/// Arg2 = the starting object (it must be an object)
+/// Arg3 = string table id
+DEFINE_OPCODE_3(GetDynamic, Reg8, Reg8, UInt32)
+OPERAND_STRING_ID(GetDynamic, 3)
+
+/// Locate the object containing a property. If not found, throw.
+/// Load the value. If it is empty, throw.
+/// Otherwise return the property from the object.
+/// Arg1 = the result
+/// Arg2 = the starting object (it must be an object)
+/// Arg3 = string table id
+DEFINE_OPCODE_3(TryGetDynamic, Reg8, Reg8, UInt32)
+OPERAND_STRING_ID(TryGetDynamic, 3)
+
+/// Locate the object containing a property. If not found, use the global
+/// object and store it.
+/// Otherwise check if the current value is "empty" and throw if it is (ignore
+/// getters).
+/// If the property is not writable and "throwOnWrite" is set (it can only be
+/// set in local scopes), throw.
+/// Otherwise store the property in the object. If the property cannot be
+/// written to, ignore it.
+/// Arg1 = the object (it must be an object)
+/// Arg2 = the value
+/// Arg3 = string table id
+DEFINE_OPCODE_3(PutDynamic, Reg8, Reg8, UInt32)
+OPERAND_STRING_ID(PutDynamic, 3)
+
+/// Locate the object containing a property. If not found, throw.
+/// Check if the current value is "empty" and throw if it is (ignore getters).
+/// If the property is not writable and "throwOnWrite" is set (it can only be
+/// set in local scopes), throw.
+/// If the property cannot be written to, throw.
+/// Otherwise store the property in the object.
+/// Arg1 = the object (it must be an object)
+/// Arg2 = the value
+/// Arg3 = string table id
+DEFINE_OPCODE_3(TryPutDynamic, Reg8, Reg8, UInt32)
+OPERAND_STRING_ID(TryPutDynamic, 3)
+
+/// Make an existing own ordinary property read-only in a local scope.
+/// Arg1 = the local scope.
+/// Arg2 = string table id.
+/// Arg3 = 1 if the "throwOnWrite" flag should be set.
+DEFINE_OPCODE_3(ReadOnlyProp, Reg8, UInt32, UInt8)
+OPERAND_STRING_ID(ReadOnlyProp, 2)
 
 /// Get an object property by string table index.
 /// Arg1 = Arg2[stringtable[Arg4]]

@@ -241,6 +241,44 @@ class Interpreter {
       Runtime *runtime,
       PinnedHermesValue *frameRegs,
       const Inst *ip);
+
+  /// Handle both GetDynamic and TryGetDynamic.
+  /// Locate the object containing a property. If not found, throw
+  /// (TryGetDynamic), or return undefined (GetDynamic).
+  /// Load the value. If it is empty, throw.
+  /// Otherwise return the property from the object.
+  static ExecutionStatus caseGetDynamic(
+      Runtime *runtime,
+      PinnedHermesValue *frameRegs,
+      const inst::Inst *ip,
+      CodeBlock *curCodeBlock);
+
+  /// Separate the slow path in a function to help register allocation.
+  static ExecutionStatus _caseGetDynamicSlowPath(
+      Runtime *runtime,
+      PinnedHermesValue *frameRegs,
+      const inst::Inst *ip,
+      CodeBlock *curCodeBlock);
+
+  /// Handle both PutDynamic and TryPutDynamic.
+  /// Locate the object containing a property. If not found, throw
+  /// (TryPutDynamic) or use the global object (PutDynamic).
+  /// Check if the current value is "empty" and throw if it is (ignore getters).
+  /// If the property has "throwOnWrite" set, throw.
+  /// If the property is not writable, throw (TryPutDynamic), or do nothing
+  /// (PutDynamic).
+  /// Otherwise store the property in the object.
+  static ExecutionStatus casePutDynamic(
+      Runtime *runtime,
+      PinnedHermesValue *frameRegs,
+      const inst::Inst *ip,
+      CodeBlock *curCodeBlock);
+
+  static ExecutionStatus _casePutDynamicSlowPath(
+      Runtime *runtime,
+      PinnedHermesValue *frameRegs,
+      const inst::Inst *ip,
+      CodeBlock *curCodeBlock);
 };
 
 #ifndef NDEBUG
