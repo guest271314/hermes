@@ -53,6 +53,8 @@ CELL_KIND(BoxedDouble)
 CELL_CLASS(Object, "Object")
 CELL_CLASS(DecoratedObject, "DecoratedObject")
 CELL_KIND(HostObject)
+CELL_KIND(StaticScope)
+CELL_KIND(DynamicScope)
 
 CELL_CLASS(Error, "Error")
 CELL_CLASS(Arguments, "Arguments")

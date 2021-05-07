@@ -72,6 +72,8 @@ HERMES_VM_GCOBJECT(JSCallableProxy);
 HERMES_VM_GCOBJECT(DecoratedObject);
 HERMES_VM_GCOBJECT(HostObject);
 HERMES_VM_GCOBJECT(SegmentedArray);
+HERMES_VM_GCOBJECT(StaticScope);
+HERMES_VM_GCOBJECT(DynamicScope);
 
 namespace testhelpers {
 struct DummyObject;

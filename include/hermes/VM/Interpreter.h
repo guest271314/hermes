@@ -236,6 +236,11 @@ class Interpreter {
       PinnedHermesValue *frameRegs,
       CodeBlock *curCodeBlock,
       uint32_t op3);
+
+  static ExecutionStatus caseNewDynamicScope(
+      Runtime *runtime,
+      PinnedHermesValue *frameRegs,
+      const Inst *ip);
 };
 
 #ifndef NDEBUG

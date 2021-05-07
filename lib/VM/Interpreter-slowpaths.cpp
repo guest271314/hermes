@@ -9,6 +9,8 @@
 #include "JSLib/JSLibInternal.h"
 #include "hermes/VM/Casting.h"
 #include "hermes/VM/Interpreter.h"
+#include "hermes/VM/JSLib.h"
+#include "hermes/VM/LocalScope.h"
 #include "hermes/VM/PropertyAccessor.h"
 #include "hermes/VM/Runtime-inline.h"
 #include "hermes/VM/StackFrame-inline.h"
@@ -330,6 +332,30 @@ ExecutionStatus Interpreter::implCallBuiltin(
   SLOW_DEBUG(
       llvh::dbgs() << "native return value r" << (unsigned)ip->iCallBuiltin.op1
                    << "=" << DumpHermesValue(O1REG(CallBuiltin)) << "\n");
+  return ExecutionStatus::RETURNED;
+}
+
+ExecutionStatus Interpreter::caseNewDynamicScope(
+    Runtime *runtime,
+    PinnedHermesValue *frameRegs,
+    const Inst *ip) {
+  if (!O3REG(NewDynamicScope).isEmpty()) {
+    auto cr = toObject(runtime, Handle<>(&O3REG(NewDynamicScope)));
+    if (LLVM_UNLIKELY(cr == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+
+    O1REG(NewDynamicScope) =
+        DynamicScope::createForWith(
+            runtime,
+            Handle<JSObject>::vmcast(&O2REG(NewDynamicScope)),
+            runtime->makeHandle<JSObject>(cr.getValue()))
+            .getHermesValue();
+  } else {
+    O1REG(NewDynamicScope) =
+        DynamicScope::createForEval(
+            runtime, Handle<JSObject>::vmcast(&O2REG(NewDynamicScope)))
+            .getHermesValue();
+  }
   return ExecutionStatus::RETURNED;
 }
 

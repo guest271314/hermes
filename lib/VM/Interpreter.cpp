@@ -21,6 +21,7 @@
 #include "hermes/VM/JSGenerator.h"
 #include "hermes/VM/JSProxy.h"
 #include "hermes/VM/JSRegExp.h"
+#include "hermes/VM/LocalScope.h"
 #include "hermes/VM/Operations.h"
 #include "hermes/VM/Profiler.h"
 #include "hermes/VM/Profiler/CodeCoverageProfiler.h"
@@ -2955,6 +2956,19 @@ tailCall:
         ip = NEXTINST(NewObjectWithParent);
         DISPATCH;
       }
+      CASE(NewStaticScope) {
+        CAPTURE_IP(
+            O1REG(NewStaticScope) =
+                StaticScope::create(
+                    runtime, Handle<JSObject>::vmcast(&O2REG(NewStaticScope)))
+                    .getHermesValue());
+        assert(
+            gcScope.getHandleCountDbg() == KEEP_HANDLES &&
+            "Should not create handles.");
+        ip = NEXTINST(NewStaticScope);
+        DISPATCH;
+      }
+      CASE_OUTOFLINE(NewDynamicScope);
 
       CASE(NewObjectWithBuffer) {
         CAPTURE_IP(

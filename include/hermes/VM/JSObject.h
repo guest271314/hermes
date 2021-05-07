@@ -460,10 +460,10 @@ class JSObject : public GCCell {
   }
 
   /// \return the `__proto__` internal property, which may be nullptr.
-  JSObject *getParent(Runtime *runtime) const {
+  JSObject *getParent(PointerBase *base) const {
     assert(
         !flags_.proxyObject && "getParent cannot be used with proxy objects");
-    return parent_.get(runtime);
+    return parent_.get(base);
   }
 
   /// \return the hidden class of this object.
