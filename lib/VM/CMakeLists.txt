@@ -18,6 +18,7 @@ set(source_files
   DummyObject.cpp
   GCBase.cpp
   GCCell.cpp
+  GlobalCache.cpp
   OrderedHashMap.cpp
   HandleRootOwner.cpp
   HeapSnapshot.cpp

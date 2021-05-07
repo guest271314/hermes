@@ -566,6 +566,7 @@ void Runtime::markWeakRoots(WeakRootAcceptor &acceptor) {
   for (auto &entry : fixedPropCache_) {
     acceptor.acceptWeak(entry.clazz);
   }
+  globalCache_.markWeakRoots(acceptor);
   for (auto &rm : runtimeModuleList_)
     rm.markWeakRoots(acceptor);
   for (auto &fn : customMarkWeakRootFuncs_)

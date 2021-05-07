@@ -111,6 +111,10 @@ class RuntimeModule final : public llvh::ilist_node<RuntimeModule> {
   /// scriptID.
   facebook::hermes::debugger::ScriptID scriptID_;
 
+  /// A unique ID during a VM execution. No other RuntimeModule will have the
+  /// same ID.
+  uint64_t uniqueModuleID_;
+
   /// A map from NewObjectWithBuffer's <keyBufferIndex, numLiterals> tuple to
   /// its shared hidden class.
   /// During hashing, keyBufferIndex takes the top 24bits while numLiterals
@@ -232,6 +236,19 @@ class RuntimeModule final : public llvh::ilist_node<RuntimeModule> {
   /// Normal destruction is reference counted, but when the Runtime shuts down,
   /// we ignore that count and delete all in an arbitrary order.
   void prepareForRuntimeShutdown();
+
+  /// \return this module's unique ID within the lifetime of the VM.
+  uint64_t getUniqueModuleId() const {
+    return uniqueModuleID_;
+  }
+
+  /// Calculate a 64-bit unique function ID (within the lifetime of the VM),
+  /// by combining the function ID with the unique module ID.
+  /// Together with a bytecode instruction address, this uniquely identifies
+  /// an instruction, and can be used as a key in per-VM caches.
+  uint64_t calcUniqueFunctionID(uint32_t functionID) const {
+    return (uniqueModuleID_ << 16) + functionID;
+  }
 
   /// For opcodes that use a stringID as identifier explicitly, we know that
   /// the compiler would have marked the stringID as identifier, and hence

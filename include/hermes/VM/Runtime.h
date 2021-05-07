@@ -22,6 +22,7 @@
 #include "hermes/VM/GC.h"
 #include "hermes/VM/GCBase-inline.h"
 #include "hermes/VM/GCStorage.h"
+#include "hermes/VM/GlobalCache.h"
 #include "hermes/VM/Handle-inline.h"
 #include "hermes/VM/HandleRootOwner-inline.h"
 #include "hermes/VM/IdentifierTable.h"
@@ -589,6 +590,11 @@ class Runtime : public HandleRootOwner,
     return commonStorage_.get();
   }
 
+  /// \return the global cache.
+  GlobalCache &getGlobalCache() {
+    return globalCache_;
+  }
+
   const GCExecTrace &getGCExecTrace() {
     return getHeap().getGCExecTrace();
   }
@@ -1091,8 +1097,10 @@ class Runtime : public HandleRootOwner,
   Handle<StringPrimitive> allocateCharacterString(char16_t ch);
 
   /// Add a \c RuntimeModule \p rm to the runtime module list.
-  void addRuntimeModule(RuntimeModule *rm) {
+  /// \return the a unique RuntimeModule id (within this execution hopefully).
+  uint64_t addRuntimeModule(RuntimeModule *rm) {
     runtimeModuleList_.push_back(*rm);
+    return runtimeModuleSeq_++;
   }
 
   /// Remove a \c RuntimeModule \p rm from the runtime module list.
@@ -1215,6 +1223,9 @@ class Runtime : public HandleRootOwner,
   /// Optional record of the last few executed bytecodes in case of a crash.
   CrashTrace crashTrace_{};
 
+  /// Each new RuntimeModule receives a unique sequential number from here.
+  uint64_t runtimeModuleSeq_ = 0;
+
   /// @name Private VM State
   /// @{
 
@@ -1243,6 +1254,9 @@ class Runtime : public HandleRootOwner,
 
   /// Cache for property lookups in non-JS code.
   PropertyCacheEntry fixedPropCache_[(size_t)PropCacheID::_COUNT];
+
+  /// A general purpose cache.
+  GlobalCache globalCache_{};
 
   /// StringPrimitive representation of the first 256 characters.
   /// These are allocated as "long-lived" objects, so they don't need

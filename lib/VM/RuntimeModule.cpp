@@ -32,7 +32,7 @@ RuntimeModule::RuntimeModule(
       flags_(flags),
       sourceURL_(sourceURL),
       scriptID_(scriptID) {
-  runtime_->addRuntimeModule(this);
+  uniqueModuleID_ = runtime_->addRuntimeModule(this);
   Domain::addRuntimeModule(domain, runtime, this);
 #ifndef HERMESVM_LEAN
   lazyRoot_ = this;
