@@ -144,24 +144,6 @@ std::unique_ptr<BytecodeModule> hbc::generateBytecodeModule(
     hermes::OptValue<uint32_t> segment,
     SourceMapGenerator *sourceMapGen,
     std::unique_ptr<BCProviderBase> baseBCProvider) {
-  return generateBytecodeModule(
-      M,
-      entryPoint,
-      entryPoint,
-      options,
-      segment,
-      sourceMapGen,
-      std::move(baseBCProvider));
-}
-
-std::unique_ptr<BytecodeModule> hbc::generateBytecodeModule(
-    Module *M,
-    Function *lexicalTopLevel,
-    Function *entryPoint,
-    const BytecodeGenerationOptions &options,
-    hermes::OptValue<uint32_t> segment,
-    SourceMapGenerator *sourceMapGen,
-    std::unique_ptr<BCProviderBase> baseBCProvider) {
   PerfSection perf("Bytecode Generation");
   lowerIR(M, options);
 
@@ -320,7 +302,7 @@ std::unique_ptr<BytecodeModule> hbc::generateBytecode(
     std::unique_ptr<BCProviderBase> baseBCProvider) {
   auto BM = generateBytecodeModule(
       M,
-      M->getTopLevelFunction(),
+      M->getEntryFunction(),
       options,
       segment,
       sourceMapGen,

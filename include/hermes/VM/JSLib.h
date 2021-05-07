@@ -12,7 +12,6 @@
 #ifndef HERMES_VM_JSLIB_H
 #define HERMES_VM_JSLIB_H
 
-#include "hermes/Support/ScopeChain.h"
 #include "hermes/VM/CallResult.h"
 #include "hermes/VM/Domain.h"
 #include "hermes/VM/Handle.h"
@@ -47,18 +46,47 @@ void createHermesBuiltins(
 std::shared_ptr<RuntimeCommonStorage> createRuntimeCommonStorage(
     bool shouldTrace);
 
+/// The source context of a local eval.
+struct LocalEvalFlags {
+  /// We must make sure to manually update whenever we change the meaning of
+  /// fields or add new ones.
+  static constexpr unsigned kVersion = 1;
+
+  /// Whether or not to evaluate in strict mode.
+  bool strictMode : 1;
+  /// The Yield param to restore when parsing.
+  bool paramYield : 1;
+  /// The Await param to restore when parsing.
+  bool paramAwait : 1;
+
+  LocalEvalFlags() {
+    strictMode = false;
+    paramYield = false;
+    paramAwait = false;
+  }
+};
+
 /// eval() entry point. Evaluate the given source \p utf8code within the given
-/// \p environment, using the given \p scopeChain to resolve identifiers.
+/// dynamic scope \p scope.
 /// \p thisArg is the initial "this" value of the function being evaluated.
 /// If \p singleFunction is set, require that the output be only a single
 /// function. \return the result of evaluation.
-CallResult<HermesValue> evalInEnvironment(
+CallResult<HermesValue> evalInScope(
     Runtime *runtime,
     llvh::StringRef utf8code,
-    Handle<Environment> environment,
-    const ScopeChain &scopeChain,
+    Handle<JSObject> scope,
     Handle<> thisArg,
+    LocalEvalFlags localEvalFlags,
     bool singleFunction);
+
+/// A wrapper of \c evalInScope that takes \c StringPrimitive.
+CallResult<HermesValue> evalInScope(
+    Runtime *runtime,
+    Handle<StringPrimitive> str,
+    Handle<JSObject> scope,
+    Handle<> thisArg,
+    LocalEvalFlags localEvalFlags,
+    bool singleFunction = false);
 
 /// If the target CJS module is not initialized, execute it.
 /// \param context the RequireContext to pass through the require.

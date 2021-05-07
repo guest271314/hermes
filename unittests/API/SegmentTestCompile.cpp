@@ -58,7 +58,7 @@ std::pair<std::string, std::string> genSplitCode(
   auto globalMemBuffer = llvh::MemoryBuffer::getMemBufferCopy("", "<global>");
   auto *globalAST = parseJS(std::move(globalMemBuffer));
   generateIRFromESTree(globalAST, &M, declFileList, {});
-  auto *topLevelFunction = M.getTopLevelFunction();
+  auto *topLevelFunction = M.getEntryFunction();
 
   auto genModule = [&](uint32_t segmentID,
                        uint32_t id,

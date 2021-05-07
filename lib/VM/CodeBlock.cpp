@@ -310,9 +310,7 @@ std::unique_ptr<hbc::BytecodeModule> compileLazyFunction(
                    << func->getLazyCompilationData()->originalName << "\n");
 
   Module M{context};
-  auto pair = hermes::generateLazyFunctionIR(func, &M, sourceRange);
-  Function *entryPoint = pair.first;
-  Function *lexicalRoot = pair.second;
+  Function *entryPoint = hermes::generateLazyFunctionIR(func, &M, sourceRange);
 
   // We look up source map URLs by iterating modules and finding the first one
   // with a matching buffer id, which will be the root module. These lazily
@@ -321,8 +319,7 @@ std::unique_ptr<hbc::BytecodeModule> compileLazyFunction(
   BytecodeGenerationOptions opts = BytecodeGenerationOptions::defaults();
   opts.stripSourceMappingURL = true;
 
-  auto bytecodeModule =
-      hbc::generateBytecodeModule(&M, lexicalRoot, entryPoint, opts);
+  auto bytecodeModule = hbc::generateBytecodeModule(&M, entryPoint, opts);
 
   return bytecodeModule;
 }

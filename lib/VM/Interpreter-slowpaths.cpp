@@ -50,16 +50,30 @@ void Interpreter::saveGenerator(
   innerFn->setState(GeneratorInnerFunction::State::SuspendedYield);
 }
 
+static LocalEvalFlags decodeEvalFlags(uint8_t flags) {
+  static_assert(kEvalFlagsVersion == 1, "Eval flags version has changed");
+  static_assert(
+      LocalEvalFlags::kVersion == 1, "LocalEvalFlags version has changed");
+  LocalEvalFlags res{};
+  if (flags & kEvalFlagStrictMode)
+    res.strictMode = true;
+  if (flags & kEvalFlagParamYield)
+    res.paramYield = true;
+  if (flags & kEvalFlagParamAwait)
+    res.paramAwait = true;
+  return res;
+}
+
 ExecutionStatus Interpreter::caseDirectEval(
     Runtime *runtime,
     PinnedHermesValue *frameRegs,
     const Inst *ip) {
   auto *result = &O1REG(DirectEval);
-  auto *input = &O2REG(DirectEval);
+  auto *input = &O4REG(DirectEval);
 
   GCScopeMarkerRAII gcMarker{runtime};
 
-  // Check to see if global eval() has been overriden, in which case call it as
+  // Check to see if global eval() has been overridden, in which case call it as
   // as normal function.
   auto global = runtime->getGlobal();
   auto existingEval = global->getNamed_RJS(
@@ -94,14 +108,13 @@ ExecutionStatus Interpreter::caseDirectEval(
     return ExecutionStatus::RETURNED;
   }
 
-  // Create a dummy scope, so that the local eval executes in its own scope
-  // (as per the spec for strict callers, which is the only thing we support).
-
-  ScopeChain scopeChain{};
-  scopeChain.functions.emplace_back();
-
-  auto cr = vm::directEval(
-      runtime, Handle<StringPrimitive>::vmcast(input), scopeChain, false);
+  auto cr = vm::evalInScope(
+      runtime,
+      Handle<StringPrimitive>::vmcast(input),
+      Handle<JSObject>::vmcast(&O2REG(DirectEval)),
+      Handle<>(&O3REG(DirectEval)),
+      decodeEvalFlags(ip->iDirectEval.op5),
+      false);
   if (cr == ExecutionStatus::EXCEPTION)
     return ExecutionStatus::EXCEPTION;
 

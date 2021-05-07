@@ -893,7 +893,7 @@ CallResult<HermesValue> Runtime::runBytecode(
     std::shared_ptr<hbc::BCProvider> &&bytecode,
     RuntimeModuleFlags flags,
     llvh::StringRef sourceURL,
-    Handle<Environment> environment,
+    Handle<GCCell> environment,
     Handle<> thisArg) {
   clearThrownValue();
 
@@ -1003,12 +1003,12 @@ CallResult<HermesValue> Runtime::runBytecode(
     // Create a JSFunction which will reference count the runtime module.
     // Note that its handle gets registered in the scope, so we don't need to
     // save it. Also note that environment will often be null here, except if
-    // this is local eval.
+    // this is local eval. If it is null, we use the global object.
     auto func = JSFunction::create(
         this,
         domain,
         Handle<JSObject>::vmcast(&functionPrototype),
-        environment,
+        *environment ? environment : getGlobal(),
         globalCode);
 
     ScopedNativeCallFrame newFrame{

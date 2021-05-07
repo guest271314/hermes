@@ -94,17 +94,6 @@ BCProviderFromSrc::createBCProviderFromSrc(
     llvh::StringRef sourceURL,
     std::unique_ptr<SourceMap> sourceMap,
     const CompileFlags &compileFlags) {
-  return createBCProviderFromSrc(
-      std::move(buffer), sourceURL, std::move(sourceMap), compileFlags, {});
-}
-
-std::pair<std::unique_ptr<BCProviderFromSrc>, std::string>
-BCProviderFromSrc::createBCProviderFromSrc(
-    std::unique_ptr<Buffer> buffer,
-    llvh::StringRef sourceURL,
-    std::unique_ptr<SourceMap> sourceMap,
-    const CompileFlags &compileFlags,
-    const ScopeChain &scopeChain) {
   std::function<void(Module &)> runOptimizationPasses{};
 #ifdef HERMESVM_ENABLE_OPTIMIZATION_AT_RUNTIME
   if (compileFlags.optimize) {
@@ -118,7 +107,6 @@ BCProviderFromSrc::createBCProviderFromSrc(
       sourceURL,
       std::move(sourceMap),
       compileFlags,
-      scopeChain,
       runOptimizationPasses);
 }
 
@@ -128,7 +116,6 @@ BCProviderFromSrc::createBCProviderFromSrc(
     llvh::StringRef sourceURL,
     std::unique_ptr<SourceMap> sourceMap,
     const CompileFlags &compileFlags,
-    const ScopeChain &scopeChain,
     const std::function<void(Module &)> &runOptimizationPasses) {
   using llvh::Twine;
 
@@ -155,8 +142,8 @@ BCProviderFromSrc::createBCProviderFromSrc(
   context->getSourceErrorManager().setWarningStatus(
       Warning::UndefinedVariable, false);
 
-  context->setStrictMode(compileFlags.strict);
-  context->setEnableEval(true);
+  context->setStrictMode(compileFlags.localEvalFlags.strictMode);
+  context->setEnableEval(compileFlags.enableEval);
   context->setPreemptiveFunctionCompilationThreshold(
       compileFlags.preemptiveFunctionCompilationThreshold);
   context->setPreemptiveFileCompilationThreshold(
@@ -206,7 +193,9 @@ BCProviderFromSrc::createBCProviderFromSrc(
 
   sem::SemContext semCtx{};
   parser::JSParser parser(*context, fileBufId, parserMode);
-  auto parsed = parser.parse();
+  auto parsed = parser.parseEval(
+      compileFlags.localEvalFlags.paramYield,
+      compileFlags.localEvalFlags.paramAwait);
   if (!parsed || !hermes::sem::validateAST(*context, semCtx, *parsed)) {
     return {nullptr, outputManager.getErrorString()};
   }
@@ -222,7 +211,13 @@ BCProviderFromSrc::createBCProviderFromSrc(
   }
 
   Module M(context);
-  hermes::generateIRFromESTree(parsed.getValue(), &M, declFileList, scopeChain);
+  if (!compileFlags.evalMode) {
+    hermes::generateIRForProgram(parsed.getValue(), &M, declFileList);
+  } else {
+    hermes::generateIRForEval(
+        parsed.getValue(), &M, compileFlags.localEvalFlags);
+  }
+
   if (context->getSourceErrorManager().getErrorCount() > 0) {
     return {nullptr, outputManager.getErrorString()};
   }
@@ -230,13 +225,18 @@ BCProviderFromSrc::createBCProviderFromSrc(
   if (compileFlags.optimize && runOptimizationPasses)
     runOptimizationPasses(M);
 
+  if (compileFlags.dumpIR) {
+    llvh::outs() << "Dynamically generated IR\n";
+    M.dump();
+  }
+
   BytecodeGenerationOptions opts{compileFlags.format};
   opts.optimizationEnabled = compileFlags.optimize;
   opts.staticBuiltinsEnabled =
       context->getOptimizationSettings().staticBuiltins;
   opts.verifyIR = compileFlags.verifyIR;
   auto bytecode = createBCProviderFromSrc(
-      hbc::generateBytecodeModule(&M, M.getTopLevelFunction(), opts));
+      hbc::generateBytecodeModule(&M, M.getEntryFunction(), opts));
   bytecode->singleFunction_ = isSingleFunctionExpression(parsed.getValue());
   return {std::move(bytecode), std::string{}};
 }

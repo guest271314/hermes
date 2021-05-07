@@ -126,14 +126,7 @@ Value *ESTreeIRGen::genExpression(ESTree::Node *expr, Identifier nameHint) {
 
   // Handle the 'this' keyword.
   if (llvh::isa<ESTree::ThisExpressionNode>(expr)) {
-    if (curFunction()->function->getDefinitionKind() ==
-        Function::DefinitionKind::ES6Arrow) {
-      assert(
-          curFunction()->capturedThis &&
-          "arrow function must have a captured this");
-      return emitStaticLoad(curFunction()->capturedThis);
-    }
-    return curFunction()->function->getThisParameter();
+    return emitThis();
   }
 
   if (auto *MP = llvh::dyn_cast<ESTree::MetaPropertyNode>(expr)) {
@@ -626,10 +619,12 @@ Value *ESTreeIRGen::genCallEvalExpr(ESTree::CallExpressionNode *call) {
     return Builder.getLiteralUndefined();
   }
 
-  Mod->getContext().getSourceErrorManager().warning(
-      Warning::DirectEval,
-      call->getSourceRange(),
-      "Direct call to eval(), but lexical scope is not supported.");
+  if (!isObjectScoping()) {
+    Mod->getContext().getSourceErrorManager().warning(
+        Warning::DirectEval,
+        call->getSourceRange(),
+        "Direct call to eval(), but lexical scope is not supported.");
+  }
 
   llvh::SmallVector<Value *, 1> args;
   for (auto &arg : call->_arguments) {
@@ -641,7 +636,37 @@ Value *ESTreeIRGen::genCallEvalExpr(ESTree::CallExpressionNode *call) {
         call->getSourceRange(), "Extra eval() arguments are ignored");
   }
 
-  return Builder.createDirectEvalInst(args[0]);
+  LexicalScopeRAII saveScope(this);
+  Value *evalScope;
+  if (isObjectScoping()) {
+    if (curFunction()->function->isStrictMode()) {
+      // In strict mode, eval() executes it a new scope.
+      emitNewScope();
+    } else {
+      // In non-strict mode, mark the current scope as "dynamic", meaning
+      // the set of its variables can change.
+      currentIRScopeDesc_->changeScopeKindToEval();
+    }
+    evalScope = currentIRScope_;
+  } else {
+    // Without dynamic scope, we just have to do something reasonable.
+    // The only "real" scope we have is the global object. We only allow
+    // "eval" to execute inside it if we are in non-strict mode and in the
+    // global scope.
+    if (!curFunction()->function->isStrictMode() &&
+        curFunction()->function->isGlobalScope()) {
+      evalScope = Builder.getGlobalObject();
+    } else {
+      // Create a new scope for eval to execute inside, to avoid unexpectedly
+      // populating the global object with variables.
+      auto *newDesc = curFunction()->function->createScopeDesc(
+          nullptr, ScopeDesc::Kind::StaticObject);
+      evalScope = Builder.createCreateScopeInst(nullptr, newDesc);
+    }
+  }
+
+  return Builder.createDirectEvalInst(
+      evalScope, emitThis(), args[0], curFunction()->deriveLocalEvalFlags());
 }
 
 /// Convert a property key node to its JavaScript string representation.

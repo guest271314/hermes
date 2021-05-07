@@ -1111,7 +1111,7 @@ std::shared_ptr<Context> createContext(
     context->setLazyCompilation(true);
   }
 
-  context->setObjectScoping(cl::ObjectScoping);
+  context->setObjectScoping(cl::ObjectScoping | cl::LazyCompilation);
 
   if (cl::CommonJS) {
     context->setUseCJSModules(true);
@@ -1557,18 +1557,19 @@ bool generateIRForSourcesAsCJSModules(
   // (main) module, from which other modules may be `require`d.
   auto globalMemBuffer = llvh::MemoryBuffer::getMemBufferCopy("", "<global>");
 
-  auto *globalAST = parseJS(context, semCtx, std::move(globalMemBuffer));
+  auto *globalAST = cast<ESTree::ProgramNode>(
+      parseJS(context, semCtx, std::move(globalMemBuffer)));
   if (generateIR) {
     // If we aren't planning to do anything with the IR,
     // don't attempt to generate it.
-    generateIRFromESTree(globalAST, &M, declFileList, {});
+    generateIRForProgram(globalAST, &M, declFileList);
   }
 
   std::vector<std::unique_ptr<SourceMap>> inputSourceMaps{};
   inputSourceMaps.push_back(nullptr);
   std::vector<std::string> sources{"<global>"};
 
-  Function *topLevelFunction = generateIR ? M.getTopLevelFunction() : nullptr;
+  Function *topLevelFunction = generateIR ? M.getEntryFunction() : nullptr;
   llvh::DenseSet<uint32_t> generatedModuleIDs;
   for (auto &entry : fileBufs) {
     uint32_t segmentID = entry.first;
@@ -1704,7 +1705,7 @@ CompileResult generateBytecodeForExecution(
   CompileResult result{Success};
   if (cl::BytecodeFormat == cl::BytecodeFormatKind::HBC) {
     result.bytecodeProvider = hbc::BCProviderFromSrc::createBCProviderFromSrc(
-        hbc::generateBytecodeModule(&M, M.getTopLevelFunction(), genOptions));
+        hbc::generateBytecodeModule(&M, M.getEntryFunction(), genOptions));
 
   } else {
     llvm_unreachable("Invalid bytecode kind for execution");
@@ -1869,19 +1870,19 @@ CompileResult processSourceFiles(
     auto sourceMapTranslator =
         std::make_shared<SourceMapTranslator>(context->getSourceErrorManager());
     context->getSourceErrorManager().setTranslator(sourceMapTranslator);
-    ESTree::NodePtr ast = parseJS(
+    auto *ast = llvh::cast_or_null<ESTree::ProgramNode>(parseJS(
         context,
         semCtx,
         std::move(mainFileBuf.file),
         std::move(sourceMap),
-        sourceMapTranslator);
+        sourceMapTranslator));
     if (!ast) {
       return ParsingFailed;
     }
     if (cl::DumpTarget < DumpIR) {
       return Success;
     }
-    generateIRFromESTree(ast, &M, declFileList, {});
+    generateIRForProgram(ast, &M, declFileList);
   }
 
   // Bail out if there were any errors. We can't ensure that the module is in

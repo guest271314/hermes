@@ -125,8 +125,6 @@ class JSParserImpl {
     lexer_.setStoreTokens(storeTokens);
   }
 
-  Optional<ESTree::ProgramNode *> parse();
-
   void seek(SMLoc startPos) {
     lexer_.seek(startPos);
     tok_ = lexer_.advance();
@@ -141,6 +139,14 @@ class JSParserImpl {
       Context &context,
       uint32_t bufferId,
       bool &useStaticBuiltinDetected);
+
+  llvh::Optional<ESTree::ProgramNode *> parse() {
+    return parseEval(false, false);
+  }
+
+  llvh::Optional<ESTree::ProgramNode *> parseEval(
+      bool paramYield,
+      bool paramAwait);
 
   /// Parse the AST of a specified function type at a given starting point.
   /// This is used for lazy compilation to parse and compile the function on

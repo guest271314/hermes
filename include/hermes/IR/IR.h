@@ -11,7 +11,6 @@
 #include "hermes/ADT/WordBitSet.h"
 #include "hermes/AST/Context.h"
 #include "hermes/Support/Conversions.h"
-#include "hermes/Support/ScopeChain.h"
 
 #ifndef HERMESVM_LEAN
 #include "hermes/AST/ESTree.h"
@@ -330,23 +329,24 @@ static inline bool kindIsA(ValueKind kind, ValueKind base) {
   }
 }
 
-/// A linked list of function scopes provided as context during IRGen.
-/// This how e.g. the debugger can provide information that an identifier 'foo'
-/// should be captured from a function two levels down the lexical stack.
-class SerializedScope {
- public:
-  /// Parent scope, if any.
-  std::shared_ptr<const SerializedScope> parentScope;
-  /// Original name of the function, if any.
-  Identifier originalName;
-  /// The generated name of the variable holding the function in the parent's
-  /// frame, which is what we need to look up to reference ourselves. It is only
-  /// set if there is an alias binding from \c originalName (which must be
-  /// valid) and said variable, which must have a different name (since it is
-  /// generated). Function::lazyClosureAlias_.
-  Identifier closureAlias;
-  /// List of variable names in the frame.
-  llvh::SmallVector<Identifier, 16> variables;
+/// The source context of a local eval.
+struct LocalEvalFlags {
+  /// We must make sure to manually update whenever we change the meaning of
+  /// fields or add new ones.
+  static constexpr unsigned kVersion = 1;
+
+  /// Whether or not to evaluate in strict mode.
+  bool strictMode : 1;
+  /// The Yield param to restore when parsing.
+  bool paramYield : 1;
+  /// The Await param to restore when parsing.
+  bool paramAwait : 1;
+
+  LocalEvalFlags() {
+    strictMode = false;
+    paramYield = false;
+    paramAwait = false;
+  }
 };
 
 #ifndef HERMESVM_LEAN
@@ -359,10 +359,8 @@ struct LazySource {
   /// The range of the function within the buffer (the whole function node, not
   /// just the lazily parsed body).
   SMRange functionRange;
-  /// The Yield param to restore when eagerly parsing.
-  bool paramYield{false};
-  /// The Await param to restore when eagerly parsing.
-  bool paramAwait{false};
+  /// Source context flags to use when reparsing.
+  LocalEvalFlags localEvalFlags;
 };
 #endif
 
@@ -1337,6 +1335,7 @@ class ScopeDesc : public Value {
   /// Child scopes.
   ScopeListType childScopes_{};
 
+ protected:
   explicit ScopeDesc(Function *function, ScopeDesc *parent, Kind kind);
 
  public:
@@ -1390,6 +1389,15 @@ class ScopeDesc : public Value {
     return scopeKind_ == Kind::Global;
   }
 
+  /// Set the scope kind to "eval", meaning that the set of variables in it
+  /// can change.
+  void changeScopeKindToEval() {
+    assert(
+        (scopeKind_ == Kind::StaticObject || scopeKind_ == Kind::Eval) &&
+        "only a static object or an eval scope can be set to eval");
+    scopeKind_ = Kind::Eval;
+  }
+
  private:
   void addChild(ScopeDesc *child) {
     childScopes_.push_back(child);
@@ -1405,6 +1413,13 @@ class ScopeDesc : public Value {
 inline unsigned ScopeVar::getIndexInVariableList() const {
   return scope_->findIndexInVariableList(this);
 }
+
+/// A specialization of ScopeDesc for an unknown scope. It has no parent and
+/// is not owned by a function.
+class UnknownScopeDesc final : public ScopeDesc {
+ public:
+  explicit UnknownScopeDesc() : ScopeDesc(nullptr, nullptr, Kind::Unknown) {}
+};
 
 /// VariableScope is a lexical scope.
 class VariableScope : public Value {
@@ -1556,27 +1571,6 @@ class Function : public llvh::ilist_node_with_parent<Function, Module>,
 #ifndef HERMESVM_LEAN
   /// The source of a function, containing function type, range and buffer ID.
   LazySource lazySource_;
-
-  /// The SerializedScope of the lazyCompilationAst.
-  std::shared_ptr<SerializedScope> lazyScope_{};
-
-  /// The parent's generated closure variable for this function. It is non-null
-  /// only if there is an alias binding from \c originalOrInferredName_ (which
-  /// must be valid) to said variable. Used only by lazy compilation.
-  ///
-  /// For a named function expresion:
-  ///     myExpression(function bar() { somecode; })
-  ///
-  /// We generate the code that's really more similar to:
-  ///     function anon_0_closure() {
-  ///         var bar=anon_0_closure;   // Nametable alias, not a real frameload
-  ///         somecode;
-  ///     }
-  ///     myExpression(anon_0_closure);
-  ///
-  /// When we generate the `function bar() {...}`, this field will be set to
-  /// the `anon_0_closure` variable to capture this relationship.
-  ScopeVar *lazyClosureAlias_{};
 #endif
 
  protected:
@@ -1759,20 +1753,6 @@ class Function : public llvh::ilist_node_with_parent<Function, Module>,
 #ifndef HERMESVM_LEAN
   LazySource &getLazySource() {
     return lazySource_;
-  }
-
-  void setLazyScope(std::shared_ptr<SerializedScope> vars) {
-    lazyScope_ = std::move(vars);
-  }
-  std::shared_ptr<SerializedScope> getLazyScope() const {
-    return lazyScope_;
-  }
-
-  void setLazyClosureAlias(ScopeVar *var) {
-    lazyClosureAlias_ = var;
-  }
-  ScopeVar *getLazyClosureAlias() const {
-    return lazyClosureAlias_;
   }
 #endif
 
@@ -1967,8 +1947,8 @@ class Module : public Value {
   using GlobalObjectPropertyList = std::vector<GlobalObjectProperty *>;
 
   std::shared_ptr<Context> Ctx;
-  /// Optionally specify the top level function, if it isn't the first one.
-  Function *topLevelFunction_{};
+  /// Optionally specify the entry point function, if it isn't the first one.
+  Function *entryFunction_{};
 
   FunctionListType FunctionList{};
 
@@ -1984,6 +1964,7 @@ class Module : public Value {
   LiteralBool literalFalse{false};
   LiteralBool literalTrue{true};
   EmptySentinel emptySentinel_{};
+  UnknownScopeDesc unknownScopeDesc_{};
 
   using LiteralNumberFoldingSet = llvh::FoldingSet<LiteralNumber>;
   using LiteralStringFoldingSet = llvh::FoldingSet<LiteralString>;
@@ -2072,22 +2053,23 @@ class Module : public Value {
     return FunctionList;
   }
 
-  /// Set the top-level function of this module - the function that will be
+  /// Set the entry point function of this module - the function that will be
   /// executed when the module is executed.
-  void setTopLevelFunction(Function *topLevelFunction) {
+  void setEntryFunction(Function *entryFunction) {
     assert(
-        topLevelFunction->getParent() == this &&
-        "topLevelFunction from a different module");
-    topLevelFunction_ = topLevelFunction;
+        entryFunction->getParent() == this &&
+        "entryFunction from a different module");
+    entryFunction_ = entryFunction;
   }
 
-  /// Return the top-level function.
-  Function *getTopLevelFunction() {
+  /// Return the entry point function.
+  Function *getEntryFunction() {
     assert(
-        !FunctionList.empty() && "top-level function hasn't been created yet");
+        !FunctionList.empty() &&
+        "entry point function hasn't been created yet");
     // If the top level function hasn't been overridden, return the first
     // function.
-    return !topLevelFunction_ ? &*FunctionList.begin() : topLevelFunction_;
+    return !entryFunction_ ? &*FunctionList.begin() : entryFunction_;
   }
 
   using GlobalObjectPropertyIterator = GlobalObjectPropertyList::const_iterator;
@@ -2140,6 +2122,10 @@ class Module : public Value {
   /// Return the shared instance of EmptySentinel.
   EmptySentinel *getEmptySentinel() {
     return &emptySentinel_;
+  }
+
+  UnknownScopeDesc *getUnknownScopeDesc() {
+    return &unknownScopeDesc_;
   }
 
   /// Add a new CJS module entry, given the function representing the module.

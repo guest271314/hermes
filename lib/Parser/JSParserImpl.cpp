@@ -111,17 +111,6 @@ void JSParserImpl::initializeIdentifiers() {
     tokenIdent_[i] = lexer_.getIdentifier(tokenKindStr((TokenKind)i));
 }
 
-Optional<ESTree::ProgramNode *> JSParserImpl::parse() {
-  PerfSection parsing("Parsing JavaScript");
-  tok_ = lexer_.advance();
-  auto res = parseProgram();
-  if (!res)
-    return None;
-  if (lexer_.getSourceMgr().getErrorCount() != 0)
-    return None;
-  return res.getValue();
-}
-
 void JSParserImpl::errorExpected(
     ArrayRef<TokenKind> toks,
     const char *where,
@@ -658,8 +647,6 @@ Optional<ESTree::BlockStatementNode *> JSParserImpl::parseFunctionBody(
 
       auto *body = new (context_) ESTree::BlockStatementNode({});
       body->isLazyFunctionBody = true;
-      body->paramYield = paramYield_;
-      body->paramAwait = paramAwait_;
       body->bufferId = lexer_.getBufferId();
       return setLocation(startLoc, endLoc, body);
     }
@@ -6189,6 +6176,23 @@ bool JSParserImpl::preParseBuffer(
   auto result = parser.parse();
   useStaticBuiltinDetected = parser.getUseStaticBuiltin();
   return result.hasValue();
+}
+
+llvh::Optional<ESTree::ProgramNode *> JSParserImpl::parseEval(
+    bool paramYield,
+    bool paramAwait) {
+  PerfSection parsing("Parsing JavaScript");
+
+  paramYield_ = paramYield;
+  paramAwait_ = paramAwait;
+
+  tok_ = lexer_.advance();
+  auto res = parseProgram();
+  if (!res)
+    return None;
+  if (lexer_.getSourceMgr().getErrorCount() != 0)
+    return None;
+  return res.getValue();
 }
 
 Optional<ESTree::NodePtr> JSParserImpl::parseLazyFunction(

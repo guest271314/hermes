@@ -2019,6 +2019,7 @@ class CreateScopeInst : public Instruction {
 
   explicit CreateScopeInst(Value *parentScope, ScopeDesc *scopeDesc)
       : Instruction(ValueKind::CreateScopeInstKind) {
+    assert(scopeDesc != nullptr && "scopeDesc can't be nullptr");
     pushOperand(parentScope);
     pushOperand(scopeDesc);
     setType(Type::createObject());
@@ -2880,17 +2881,60 @@ class SaveAndYieldInst : public TerminatorInst {
   }
 };
 
-class DirectEvalInst : public SingleOperandInst {
+class DirectEvalInst : public Instruction {
   DirectEvalInst(const DirectEvalInst &) = delete;
   void operator=(const DirectEvalInst &) = delete;
 
  public:
-  explicit DirectEvalInst(Value *value)
-      : SingleOperandInst(ValueKind::DirectEvalInstKind, value) {}
+  enum { EvalScopeIdx, ThisValIdx, ParamIdx, FlagsIdx };
+
+  /// No eval flag is set.
+  enum : uint8_t {
+    FlagNone = 0,
+    /// Whether or not to evaluate in strict mode.
+    FlagStrictMode = 1,
+    /// The Yield param to restore when parsing.
+    FlagParamYield = 2,
+    /// The Await param to restore when parsing.
+    FlagParamAwait = 4,
+  };
+
+  /// Convert from LocalEvalFlags to the bit flags encode in eval.
+  static uint8_t bitsFromLocalEvalFlags(LocalEvalFlags flags) {
+    static_assert(LocalEvalFlags::kVersion == 1, "LocalEvalFlags has changed");
+    return (flags.strictMode ? FlagStrictMode : 0) |
+        (flags.paramYield ? FlagParamYield : 0) |
+        (flags.paramAwait ? FlagParamAwait : 0);
+  }
+
+  explicit DirectEvalInst(
+      Value *evalScope,
+      Value *thisVal,
+      Value *param,
+      LiteralNumber *flags)
+      : Instruction(ValueKind::DirectEvalInstKind) {
+    pushOperand(evalScope);
+    pushOperand(thisVal);
+    pushOperand(param);
+    pushOperand(flags);
+  }
   explicit DirectEvalInst(
       const DirectEvalInst *src,
       llvh::ArrayRef<Value *> operands)
-      : SingleOperandInst(src, operands) {}
+      : Instruction(src, operands) {}
+
+  Value *getEvalScope() const {
+    return getOperand(EvalScopeIdx);
+  }
+  Value *getThisVal() const {
+    return getOperand(ThisValIdx);
+  }
+  Value *getParam() const {
+    return getOperand(ParamIdx);
+  }
+  uint8_t getFlags() const {
+    return cast<LiteralNumber>(getOperand(FlagsIdx))->asUInt8();
+  }
 
   SideEffectKind getSideEffect() const {
     return SideEffectKind::Unknown;

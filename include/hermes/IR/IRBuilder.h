@@ -398,7 +398,11 @@ class IRBuilder {
       Value *value,
       UnaryOperatorInst::OpKind opKind);
 
-  DirectEvalInst *createDirectEvalInst(Value *operand);
+  DirectEvalInst *createDirectEvalInst(
+      Value *evalScope,
+      Value *thisVal,
+      Value *operand,
+      LocalEvalFlags evalFlags);
 
   SwitchInst *createSwitchInst(
       Value *input,

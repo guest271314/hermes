@@ -313,14 +313,9 @@ std::unique_ptr<BytecodeModule> BytecodeModuleGenerator::generate() {
       auto lazyData = std::make_unique<LazyCompilationData>();
       lazyData->parentScope = F->getLazyScope();
       lazyData->nodeKind = F->getLazySource().nodeKind;
-      lazyData->paramYield = F->getLazySource().paramYield;
-      lazyData->paramAwait = F->getLazySource().paramAwait;
+      lazyData->localEvalFlags = F->getLazySource().localEvalFlags;
       lazyData->bufferId = F->getLazySource().bufferId;
       lazyData->originalName = F->getOriginalOrInferredName();
-      lazyData->closureAlias = F->getLazyClosureAlias()
-          ? F->getLazyClosureAlias()->getName()
-          : Identifier();
-      lazyData->strictMode = F->isStrictMode();
       func->setLazyCompilationData(std::move(lazyData));
 #endif
     }

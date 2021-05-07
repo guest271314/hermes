@@ -867,8 +867,16 @@ SwitchImmInst *IRBuilder::createSwitchImmInst(
   return inst;
 }
 
-DirectEvalInst *IRBuilder::createDirectEvalInst(Value *operand) {
-  auto *inst = new DirectEvalInst(operand);
+DirectEvalInst *IRBuilder::createDirectEvalInst(
+    Value *evalScope,
+    Value *thisVal,
+    Value *operand,
+    LocalEvalFlags evalFlags) {
+  auto *inst = new DirectEvalInst(
+      evalScope,
+      thisVal,
+      operand,
+      getLiteralNumber(DirectEvalInst::bitsFromLocalEvalFlags(evalFlags)));
   insert(inst);
   return inst;
 }

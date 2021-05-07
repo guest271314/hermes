@@ -111,7 +111,12 @@ void IRPrinter::printValueLabel(Instruction *I, Value *V, unsigned opIndex) {
     }
     os << "%S" << ScopeNamer.getNumber(SD);
     if (I->getParent()->getParent() != SD->getFunction()) {
-      os << "@" << quoteStr(SD->getFunction()->getInternalNameStr());
+      os << "@";
+      // Unknown scopes don't have a function.
+      if (SD->getFunction())
+        os << quoteStr(SD->getFunction()->getInternalNameStr());
+      else
+        os << "?unknown";
     }
   };
 

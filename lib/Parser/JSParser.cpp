@@ -56,10 +56,6 @@ bool JSParser::getUseStaticBuiltin() const {
   return impl_->getUseStaticBuiltin();
 }
 
-llvh::Optional<ESTree::ProgramNode *> JSParser::parse() {
-  return impl_->parse();
-}
-
 void JSParser::seek(SMLoc startPos) {
   return impl_->seek(startPos);
 }
@@ -70,6 +66,12 @@ bool JSParser::preParseBuffer(
     bool &useStaticBuiltinDetected) {
   return detail::JSParserImpl::preParseBuffer(
       context, bufferId, useStaticBuiltinDetected);
+}
+
+llvh::Optional<ESTree::ProgramNode *> JSParser::parseEval(
+    bool paramYield,
+    bool paramAwait) {
+  return impl_->parseEval(paramYield, paramAwait);
 }
 
 llvh::Optional<ESTree::NodePtr> JSParser::parseLazyFunction(

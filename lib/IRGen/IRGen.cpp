@@ -18,17 +18,22 @@ namespace hermes {
 using namespace hermes::irgen;
 using llvh::dbgs;
 
-bool generateIRFromESTree(
-    ESTree::NodePtr node,
+void generateIRForProgram(
+    ESTree::ProgramNode *programNode,
     Module *M,
-    const DeclarationFileListTy &declFileList,
-    const ScopeChain &scopeChain) {
+    const DeclarationFileListTy &declFileList) {
   // Generate IR into the module M.
-  ESTreeIRGen Generator(node, declFileList, M, scopeChain);
-  Generator.doIt();
+  ESTreeIRGen generator(programNode, declFileList, M);
+  generator.doProgram();
 
   LLVM_DEBUG(dbgs() << "Finished IRGen.\n");
-  return false;
+}
+
+void generateIRForEval(
+    ESTree::ProgramNode *node,
+    Module *M,
+    LocalEvalFlags localEvalFlags) {
+  ESTreeIRGen(node, {}, M).doEval(localEvalFlags);
 }
 
 void generateIRForCJSModule(
@@ -40,12 +45,12 @@ void generateIRForCJSModule(
     Function *topLevelFunction,
     const DeclarationFileListTy &declFileList) {
   // Generate IR into the module M.
-  ESTreeIRGen generator(node, declFileList, M, {});
+  ESTreeIRGen generator(node, declFileList, M);
   return generator.doCJSModule(
       topLevelFunction, node->getSemInfo(), segmentID, id, filename);
 }
 
-std::pair<Function *, Function *> generateLazyFunctionIR(
+Function *generateLazyFunctionIR(
     hbc::BytecodeFunction *bcFunction,
     Module *M,
     llvh::SMRange sourceRange) {
@@ -61,18 +66,18 @@ std::pair<Function *, Function *> generateLazyFunctionIR(
   // Note: we don't know the parent's strictness, which we need to pass, but
   // we can just use the child's strictness, which is always stricter or equal
   // to the parent's.
-  parser.setStrictMode(lazyData->strictMode);
+  parser.setStrictMode(lazyData->localEvalFlags.strictMode);
 
   auto parsed = parser.parseLazyFunction(
       (ESTree::NodeKind)lazyData->nodeKind,
-      lazyData->paramYield,
-      lazyData->paramAwait,
+      lazyData->localEvalFlags.paramYield,
+      lazyData->localEvalFlags.paramAwait,
       sourceRange.Start);
 
   // In case of error, generate a function that just throws a SyntaxError.
   if (!parsed ||
       !sem::validateFunctionAST(
-          context, semCtx, *parsed, lazyData->strictMode)) {
+          context, semCtx, *parsed, lazyData->localEvalFlags.strictMode)) {
     LLVM_DEBUG(
         llvh::dbgs() << "Lazy AST parsing/validation failed with error: "
                      << diagHandler.getErrorString());
@@ -80,10 +85,10 @@ std::pair<Function *, Function *> generateLazyFunctionIR(
     auto *error = ESTreeIRGen::genSyntaxErrorFunction(
         M, lazyData->originalName, sourceRange, diagHandler.getErrorString());
 
-    return {error, error};
+    return error;
   }
 
-  ESTreeIRGen generator{parsed.getValue(), {}, M, {}};
+  ESTreeIRGen generator{parsed.getValue(), {}, M};
   return generator.doLazyFunction(lazyData);
 }
 

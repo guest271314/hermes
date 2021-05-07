@@ -210,6 +210,9 @@ class FunctionContext {
 
   /// Remove a scope from the set of available scopes.
   void removeAvailableScope(ScopeDesc *desc);
+
+  /// Derive the LocalEvalFlags from the current context.
+  LocalEvalFlags deriveLocalEvalFlags();
 };
 
 enum class ControlFlowChange { Break, Continue };
@@ -463,10 +466,6 @@ class ESTreeIRGen {
   /// scope is created.
   ScopeDesc *bottomMostScopeDesc_ = nullptr;
 
-  /// Lexical scope chain from the runtime, used to resolve identifiers in local
-  /// eval.
-  std::shared_ptr<SerializedScope> lexicalScopeChain;
-
   /// Identifier representing the string "eval".
   const Identifier identEval_;
 
@@ -497,11 +496,13 @@ class ESTreeIRGen {
   explicit ESTreeIRGen(
       ESTree::Node *root,
       const DeclarationFileListTy &declFileList,
-      Module *M,
-      const ScopeChain &scopeChain);
+      Module *M);
 
-  /// Perform IRGeneration for the whole module.
-  void doIt();
+  /// Perform IRGeneration for whole program.
+  void doProgram();
+
+  /// Perform IRGeneration for eval() body.
+  void doEval(LocalEvalFlags evalFlags);
 
   /// Perform IR generation for a given CJS module.
   void doCJSModule(
@@ -512,9 +513,8 @@ class ESTreeIRGen {
       llvh::StringRef filename);
 
   /// Perform IR generation for a lazy function.
-  /// \return the newly allocated generated Function IR and lexical root
-  std::pair<Function *, Function *> doLazyFunction(
-      hbc::LazyCompilationData *lazyData);
+  /// \return the newly allocated generated Function IR
+  Function *doLazyFunction(hbc::LazyCompilationData *lazyData);
 
   /// Generate a function which immediately throws the specified SyntaxError
   /// message.
@@ -809,17 +809,12 @@ class ESTreeIRGen {
   /// The body may optionally be lazy.
   /// \param originalName is the original non-unique name specified by the user
   ///   or inferred according to the rules of ES6.
-  /// \param lazyClosureAlias an optional variable in the parent that will
-  ///   contain the closure being created. It is non-null only if an alias
-  ///   binding from  \c originalName to the variable was created and is
-  ///   available inside the closure. Used only by lazy compilation.
   /// \param functionNode is the ESTree function node (declaration, expression,
   ///   object method).
   /// \param isGeneratorInnerFunction whether this is a GeneratorInnerFunction.
   /// \returns a new Function.
   Function *genES5Function(
       Identifier originalName,
-      ScopeVar *lazyClosureAlias,
       ESTree::FunctionLikeNode *functionNode,
       bool isGeneratorInnerFunction = false);
 
@@ -828,23 +823,17 @@ class ESTreeIRGen {
   /// inner function and returns the result.
   /// \param originalName is the original non-unique name specified by the user
   ///   or inferred according to the rules of ES6.
-  /// \param lazyClosureAlias an optional variable in the parent that will
-  ///   contain the closure being created. It is non-null only if an alias
-  ///   binding from  \c originalName to the variable was created and is
-  ///   available inside the closure. Used only by lazy compilation.
   /// \param functionNode is the ESTree function node (declaration, expression,
   ///   object method).
   /// \return the outer Function.
   Function *genGeneratorFunction(
       Identifier originalName,
-      ScopeVar *lazyClosureAlias,
       ESTree::FunctionLikeNode *functionNode);
 
-  /// Set the current scope to the lazy scope on \p function
-  /// and assigns the proper source range and information in order to
+  /// Assigns the proper source range in \p function and information in order to
   /// continue later in lazy compilation.
   /// \param bodyBlock the body of the function, must be a lazy function body.
-  void setupLazyScope(
+  void setupLazySource(
       ESTree::FunctionLikeNode *functionNode,
       Function *function,
       ESTree::BlockStatementNode *bodyBlock);
@@ -857,16 +846,11 @@ class ESTreeIRGen {
   ///   function<name>(){return spawnAsync(function*()<body>, this, arguments)}
   /// \param originalName is the original non-unique name specified by the user
   ///   or inferred according to the rules of ES6.
-  /// \param lazyClosureAlias an optional variable in the parent that will
-  ///   contain the closure being created. It is non-null only if an alias
-  ///   binding from  \c originalName to the variable was created and is
-  ///   available inside the closure. Used only by lazy compilation.
   /// \param functionNode is the ESTree function node (declaration, expression,
   ///   object method).
   /// \return the async Function.
   Function *genAsyncFunction(
       Identifier originalName,
-      ScopeVar *lazyClosureAlias,
       ESTree::FunctionLikeNode *functionNode);
 
   /// In the beginning of an ES5 function, initialize the special captured
@@ -901,6 +885,14 @@ class ESTreeIRGen {
       InitES5CaptureState doInitES5CaptureState,
       DoEmitParameters doEmitParameters);
 
+  /// Create variable declarations for each of the hoisted variables and
+  /// functions. Initialize only the variables to undefined.
+  void declareHoisted();
+
+  /// Emit the code for the import declarations and the hoisted function
+  /// declaration.
+  void emitHoistedFunctionDeclarations();
+
   /// Emit the loading and initialization of parameters in the function
   /// prologue.
   void emitParameters(ESTree::FunctionLikeNode *funcNode);
@@ -917,10 +909,6 @@ class ESTreeIRGen {
   /// \param returnValue if non-nullptr, a return instruction for it is emitted
   ///   with debug location at the end of the source range.
   void emitFunctionEpilogue(Value *returnValue);
-
-  /// Generate a body for a dummy function so that it doesn't crash the
-  /// backend when encountered.
-  static void genDummyFunction(Function *dummy);
 
   /// @}
 
@@ -957,7 +945,7 @@ class ESTreeIRGen {
   void declareAmbientProperty(Identifier name);
 
   /// Scan all the global declarations in the supplied declaration file and
-  /// declare them as global properties.
+  /// declare them as global properties. Do nothing in dynamic scoping mode.
   void processDeclarationFile(ESTree::ProgramNode *programNode);
 
   /// The result of \c findClosestScope().
@@ -1202,6 +1190,9 @@ class ESTreeIRGen {
       bool dynamicObjectScope = false,
       Value *withValue = nullptr);
 
+  /// \return the value of "this" in the current function.
+  Value *emitThis();
+
   /// Emit an instruction to load a value from a specified location.
   /// \param from location to load from, either a Variable or
   ///     GlobalObjectProperty.
@@ -1245,35 +1236,6 @@ class ESTreeIRGen {
       IRBuilder &builder,
       StringRef errorType,
       StringRef errorMessage);
-
- private:
-  /// "Converts" a ScopeChain into a SerializedScope by resolving the
-  /// identifiers.
-  std::shared_ptr<SerializedScope> resolveScopeIdentifiers(
-      const ScopeChain &chain);
-
-  /// Materialize the provided scope.
-  void materializeScopesInChain(
-      Function *wrapperFunction,
-      const std::shared_ptr<const SerializedScope> &scope,
-      int depth);
-
-  /// Add dummy functions for lexical scope debug info
-  void addLexicalDebugInfo(
-      Function *child,
-      Function *global,
-      const std::shared_ptr<const SerializedScope> &scope);
-
-  /// Save all variables currently in scope, for lazy compilation.
-  std::shared_ptr<SerializedScope> saveCurrentScope() {
-    return serializeScope(curFunction(), true);
-  }
-
-  /// Recursively serialize scopes. The global scope is serialized
-  /// if and only if it's the first scope and includeGlobal is true.
-  std::shared_ptr<SerializedScope> serializeScope(
-      FunctionContext *ctx,
-      bool includeGlobal);
 };
 
 template <typename EB, typename EF, typename EH>

@@ -8,7 +8,6 @@
 #ifndef HERMES_VM_JSLIB_JSLIBINTERNAL_H
 #define HERMES_VM_JSLIB_JSLIBINTERNAL_H
 
-#include "hermes/Support/ScopeChain.h"
 #include "hermes/VM/Callable.h"
 #include "hermes/VM/JSDate.h"
 #include "hermes/VM/JSError.h"
@@ -422,13 +421,6 @@ CallResult<HermesValue> createDynamicFunction(
     Runtime *runtime,
     NativeArgs args,
     DynamicFunctionKind kind);
-
-/// A direct passthrough to call eval() on \p str.
-CallResult<HermesValue> directEval(
-    Runtime *runtime,
-    Handle<StringPrimitive> str,
-    const ScopeChain &scopeChain,
-    bool singleFunction = false);
 
 /// ES10 23.1.1.2 AddEntriesFromIterable
 /// Calls a callback with each pair of [key, value] from an iterable.

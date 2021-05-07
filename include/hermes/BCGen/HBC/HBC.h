@@ -43,15 +43,6 @@ std::unique_ptr<BytecodeModule> generateBytecodeModule(
     SourceMapGenerator *sourceMap = nullptr,
     std::unique_ptr<BCProviderBase> baseBCProvider = nullptr);
 
-std::unique_ptr<BytecodeModule> generateBytecodeModule(
-    Module *M,
-    Function *lexicalTopLevel,
-    Function *entryPoint,
-    const BytecodeGenerationOptions &options,
-    hermes::OptValue<uint32_t> segment = llvh::None,
-    SourceMapGenerator *sourceMap = nullptr,
-    std::unique_ptr<BCProviderBase> baseBCProvider = nullptr);
-
 /// Parses the OutputFormatKind and generates bytecode.
 /// Will dump the operation specified, or will output a bundle.
 /// The source map \p sourceMap, if not null, is populated with debug

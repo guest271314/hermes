@@ -260,7 +260,7 @@ class Runtime : public HandleRootOwner,
       std::shared_ptr<hbc::BCProvider> &&bytecode,
       RuntimeModuleFlags runtimeModuleFlags,
       llvh::StringRef sourceURL,
-      Handle<Environment> environment,
+      Handle<GCCell> environment,
       Handle<> thisArg);
 
   /// Runs the given \p bytecode. If \p environment is not null, set it as the
@@ -273,7 +273,7 @@ class Runtime : public HandleRootOwner,
       std::shared_ptr<hbc::BCProvider> &&bytecode,
       RuntimeModuleFlags runtimeModuleFlags,
       llvh::StringRef sourceURL,
-      Handle<Environment> environment) {
+      Handle<GCCell> environment) {
     getHeap().runtimeWillExecute();
     return runBytecode(
         std::move(bytecode),

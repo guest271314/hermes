@@ -19,6 +19,9 @@ enum class OpCode : uint8_t {
   _last
 };
 
+// Define all constants.
+#define DEFINE_CONST(type, name, val) static constexpr type name = val;
+
 // Define all instructions.
 #define DEFINE_OPERAND_TYPE(name, type) typedef type Operand##name;
 

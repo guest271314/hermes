@@ -139,8 +139,8 @@ class Context {
   bool enableEval_{true};
 
   /// If true, every function will be compiled lazily when invoked for the
-  /// first time.
-  // bool lazyCompilation_{false};
+  /// first time. Requires \c dynamicScoping_ to be set.
+  bool lazyCompilation_{false};
 
   /// If true, we use objects and dynamic scoping.
   bool objectScoping_{false};
@@ -316,21 +316,20 @@ class Context {
   }
 
   bool isLazyCompilation() const {
-    // FIXME: TEMPORARILY DISABLED
-    // return lazyCompilation_;
-    return false;
+    return lazyCompilation_;
   }
 
   void setLazyCompilation(bool lazyCompilation) {
-    // FIXME: TEMPORARILY DISABLED
-    // lazyCompilation_ = lazyCompilation;
+    lazyCompilation_ = lazyCompilation;
+    if (lazyCompilation)
+      objectScoping_ = true;
   }
 
   bool isObjectScoping() const {
     return objectScoping_;
   }
   void setObjectScoping(bool objectScoping) {
-    objectScoping_ = objectScoping;
+    objectScoping_ = lazyCompilation_ | objectScoping;
   }
 
   unsigned getPreemptiveFunctionCompilationThreshold() {

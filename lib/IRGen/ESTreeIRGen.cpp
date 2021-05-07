@@ -119,110 +119,55 @@ llvh::Optional<Identifier> LReference::getNameHint() const {
 ESTreeIRGen::ESTreeIRGen(
     ESTree::Node *root,
     const DeclarationFileListTy &declFileList,
-    Module *M,
-    const ScopeChain &scopeChain)
+    Module *M)
     : Mod(M),
       Builder(Mod),
       instrumentIR_(M, Builder),
       Root(root),
       DeclarationFileList(declFileList),
-      lexicalScopeChain(resolveScopeIdentifiers(scopeChain)),
       identEval_(Builder.createIdentifier("eval")),
       identLet_(Builder.createIdentifier("let")),
       identDefaultExport_(Builder.createIdentifier("?default")) {}
 
-void ESTreeIRGen::doIt() {
+void ESTreeIRGen::doProgram() {
   LLVM_DEBUG(dbgs() << "Processing top level program.\n");
 
-  ESTree::ProgramNode *Program;
-
-  Program = llvh::dyn_cast<ESTree::ProgramNode>(Root);
-
-  if (!Program) {
+  auto *program = llvh::dyn_cast<ESTree::ProgramNode>(Root);
+  if (!program) {
     Builder.getModule()->getContext().getSourceErrorManager().error(
-        SMLoc{}, "missing 'Program' AST node");
+        SMLoc{}, "missing 'program' AST node");
     return;
   }
 
-  LLVM_DEBUG(dbgs() << "Found Program decl.\n");
-
-  // The function which will "execute" the module.
-  Function *topLevelFunction;
+  LLVM_DEBUG(dbgs() << "Found program decl.\n");
 
   LexicalScopeRAII saveGlobalScope(this);
 
-  // Function context used only when compiling in an existing lexical scope
-  // chain. It is only initialized if we have a lexical scope chain.
-  llvh::Optional<FunctionContext> wrapperFunctionContext{};
+  // The function which will "execute" the module.
+  Function *topLevelFunction = Builder.createTopLevelFunction(
+      ESTree::isStrict(program->strictness), program->getSourceRange());
 
-  if (!lexicalScopeChain) {
-    topLevelFunction = Builder.createTopLevelFunction(
-        ESTree::isStrict(Program->strictness), Program->getSourceRange());
+  Mod->setEntryFunction(topLevelFunction);
 
-    setNewScope(
-        topLevelFunction->createScopeDesc(nullptr, ScopeDesc::Kind::Global),
-        Builder.getGlobalObject());
-    bottomMostScopeDesc_ = currentIRScopeDesc_;
-  } else {
-    // If compiling in an existing lexical context, we need to install the
-    // scopes in a wrapper function, which represents the "global" code.
-
-    Function *wrapperFunction = Builder.createFunction(
-        "",
-        Function::DefinitionKind::ES5Function,
-        ESTree::isStrict(Program->strictness),
-        Program->getSourceRange(),
-        true);
-
-    setNewScope(
-        wrapperFunction->createScopeDesc(nullptr, ScopeDesc::Kind::Global),
-        Builder.getGlobalObject());
-    bottomMostScopeDesc_ = currentIRScopeDesc_;
-
-    // Initialize the wrapper context.
-    wrapperFunctionContext.emplace(this, wrapperFunction, nullptr);
-
-    // Populate it with dummy code so it doesn't crash the back-end.
-    genDummyFunction(wrapperFunction);
-
-    // Restore the previously saved parent scopes.
-    materializeScopesInChain(wrapperFunction, lexicalScopeChain, -1);
-
-    // Finally create the function which will actually be executed.
-    topLevelFunction = Builder.createFunction(
-        "eval",
-        Function::DefinitionKind::ES5Function,
-        ESTree::isStrict(Program->strictness),
-        Program->getSourceRange(),
-        false);
-  }
-
-  Mod->setTopLevelFunction(topLevelFunction);
+  setNewScope(
+      topLevelFunction->createScopeDesc(nullptr, ScopeDesc::Kind::Global),
+      Builder.getGlobalObject());
+  bottomMostScopeDesc_ = currentIRScopeDesc_;
 
   // Function context for topLevelFunction.
   FunctionContext topLevelFunctionContext{
-      this, topLevelFunction, Program->getSemInfo()};
+      this, topLevelFunction, program->getSemInfo()};
 
-  // IRGen needs a pointer to the outer-most context, which is either
-  // topLevelContext or wrapperFunctionContext, depending on whether the latter
-  // was created.
-  // We want to set the pointer to that outer-most context, but ensure that it
-  // doesn't outlive the context it is pointing to.
   llvh::SaveAndRestore<FunctionContext *> saveTopLevelContext(
-      topLevelContext,
-      !wrapperFunctionContext.hasValue() ? &topLevelFunctionContext
-                                         : &wrapperFunctionContext.getValue());
+      topLevelContext, &topLevelFunctionContext);
 
-  // Now declare all externally supplied global properties, but only if we don't
-  // have a lexical scope chain.
-  if (!lexicalScopeChain) {
-    for (auto declFile : DeclarationFileList) {
-      processDeclarationFile(declFile);
-    }
+  // Now declare all externally supplied global properties.
+  for (auto declFile : DeclarationFileList) {
+    processDeclarationFile(declFile);
   }
 
   emitFunctionPrologue(
-      Program,
+      program,
       Builder.createBasicBlock(topLevelFunction),
       InitES5CaptureState::Yes,
       DoEmitParameters::Yes);
@@ -235,7 +180,61 @@ void ESTreeIRGen::doIt() {
     Builder.createStoreStackInst(
         Builder.getLiteralUndefined(), curFunction()->globalReturnRegister);
 
-    genBody(Program->_body);
+    genBody(program->_body);
+
+    // Terminate the top-level scope with a return statement.
+    retVal = Builder.createLoadStackInst(curFunction()->globalReturnRegister);
+  }
+
+  emitFunctionEpilogue(retVal);
+}
+
+void ESTreeIRGen::doEval(LocalEvalFlags evalFlags) {
+  auto *evalNode = cast<ESTree::ProgramNode>(Root);
+
+  LexicalScopeRAII saveStartScope(this);
+  setNewScope(Mod->getUnknownScopeDesc(), nullptr);
+
+  // The function which will "execute" the module.
+  Function *evalFunction = Builder.createFunction(
+      "eval",
+      Function::DefinitionKind::ES5Function,
+      ESTree::isStrict(evalNode->strictness),
+      evalNode->getSourceRange());
+
+  Mod->setEntryFunction(evalFunction);
+
+  FunctionContext evalFunctionContext{
+      this, evalFunction, evalNode->getSemInfo()};
+
+  llvh::SaveAndRestore<FunctionContext *> saveFunctionContext(
+      topLevelContext, &evalFunctionContext);
+
+  LexicalScopeRAII saveFunctionScope(this);
+
+  Builder.setLocation(evalNode->getSourceRange().Start);
+  Builder.setInsertionBlock(Builder.createBasicBlock(evalFunction));
+
+  setNewScope(
+      currentIRScopeDesc_,
+      Builder.createGetFunctionParentScopeInst(currentIRScopeDesc_));
+
+  declareHoisted();
+
+  // Create the "this" parameter.
+  Builder.createParameter(evalFunction, "this");
+
+  emitHoistedFunctionDeclarations();
+
+  Value *retVal;
+  {
+    // Allocate the return register, initialize it to undefined.
+    curFunction()->globalReturnRegister =
+        Builder.createAllocStackInst(genAnonymousLabelName("ret"));
+    Builder.createStoreStackInst(
+        Builder.getLiteralUndefined(), curFunction()->globalReturnRegister);
+
+    genBody(evalNode->_body);
 
     // Terminate the top-level scope with a return statement.
     retVal = Builder.createLoadStackInst(curFunction()->globalReturnRegister);
@@ -278,38 +277,24 @@ void ESTreeIRGen::doCJSModule(
   llvh::SaveAndRestore<FunctionContext *> saveTopLevelContext(
       topLevelContext, &topLevelFunctionContext);
 
-  // Now declare all externally supplied global properties, but only if we don't
-  // have a lexical scope chain.
-  assert(
-      !lexicalScopeChain &&
-      "Lexical scope chain not supported for CJS modules");
+  // Now declare all externally supplied global properties.
   for (auto declFile : DeclarationFileList) {
     processDeclarationFile(declFile);
   }
 
   Identifier functionName = Builder.createIdentifier("cjs_module");
-  Function *newFunc = genES5Function(functionName, nullptr, func);
+  Function *newFunc = genES5Function(functionName, func);
 
   Builder.getModule()->addCJSModule(
       segmentID, id, Builder.createIdentifier(filename), newFunc);
 }
 
-static int getDepth(const std::shared_ptr<SerializedScope> chain) {
-  int depth = 0;
-  const SerializedScope *current = chain.get();
-  while (current) {
-    depth += 1;
-    current = current->parentScope.get();
-  }
-  return depth;
-}
-
-std::pair<Function *, Function *> ESTreeIRGen::doLazyFunction(
-    hbc::LazyCompilationData *lazyData) {
+Function *ESTreeIRGen::doLazyFunction(hbc::LazyCompilationData *lazyData) {
   // Create a top level function that will never be executed, because:
   // 1. IRGen assumes the first function always has global scope
   // 2. It serves as the root for dummy functions for lexical data
-  Function *topLevel = Builder.createTopLevelFunction(lazyData->strictMode, {});
+  Function *topLevel =
+      Builder.createTopLevelFunction(lazyData->localEvalFlags.strictMode, {});
 
   FunctionContext topLevelFunctionContext{this, topLevel, nullptr};
 
@@ -320,31 +305,6 @@ std::pair<Function *, Function *> ESTreeIRGen::doLazyFunction(
 
   auto *node = cast<ESTree::FunctionLikeNode>(Root);
 
-  // We restore scoping information in two separate ways:
-  // 1. By adding them to ExternalScopes for resolution here
-  // 2. By adding dummy functions for lexical scoping debug info later
-  //
-  // Instruction selection determines the delta between the ExternalScope
-  // and the dummy function chain, so we add the ExternalScopes with
-  // positive depth.
-  lexicalScopeChain = lazyData->parentScope;
-  materializeScopesInChain(
-      topLevel, lexicalScopeChain, getDepth(lexicalScopeChain) - 1);
-
-  // If lazyData->closureAlias is specified, we must create an alias binding
-  // between originalName (which must be valid) and the variable identified by
-  // closureAlias.
-  ScopeVar *parentVar = nullptr;
-  if (lazyData->closureAlias.isValid()) {
-    assert(lazyData->originalName.isValid() && "Original name invalid");
-    assert(
-        lazyData->originalName != lazyData->closureAlias &&
-        "Original name must be different from the alias");
-
-    // NOTE: the closureAlias target must exist and must be a Variable.
-    parentVar = cast<ScopeVar>(nameTable_.lookup(lazyData->closureAlias));
-  }
-
   assert(
       !llvh::isa<ESTree::ArrowFunctionExpressionNode>(node) &&
       "lazy compilation not supported for arrow functions");
@@ -353,12 +313,11 @@ std::pair<Function *, Function *> ESTreeIRGen::doLazyFunction(
   // for the inner functions. This means that we will never directly generate
   // a GeneratorInnerFunction here.
   Function *func = ESTree::isAsync(node)
-      ? genAsyncFunction(lazyData->originalName, parentVar, node)
+      ? genAsyncFunction(lazyData->originalName, node)
       : ESTree::isGenerator(node)
-      ? genGeneratorFunction(lazyData->originalName, parentVar, node)
-      : genES5Function(lazyData->originalName, parentVar, node, false);
-  addLexicalDebugInfo(func, topLevel, lexicalScopeChain);
-  return {func, topLevel};
+      ? genGeneratorFunction(lazyData->originalName, node)
+      : genES5Function(lazyData->originalName, node, false);
+  return func;
 }
 
 std::pair<Value *, bool> ESTreeIRGen::declareVariableOrGlobalProperty(
@@ -505,6 +464,8 @@ struct DeclHoisting {
 } // anonymous namespace.
 
 void ESTreeIRGen::processDeclarationFile(ESTree::ProgramNode *programNode) {
+  if (isObjectScoping())
+    return;
   auto Program = dyn_cast_or_null<ESTree::ProgramNode>(programNode);
   if (!Program)
     return;
@@ -1308,6 +1269,17 @@ void ESTreeIRGen::emitNewScope(bool dynamicObjectScope, Value *withValue) {
   curFunction()->addAvailableScope(newDesc, newIR);
 }
 
+Value *ESTreeIRGen::emitThis() {
+  if (curFunction()->function->getDefinitionKind() ==
+      Function::DefinitionKind::ES6Arrow) {
+    assert(
+        curFunction()->capturedThis &&
+        "arrow function must have a captured this");
+    return emitLoad(curFunction()->capturedThis);
+  }
+  return curFunction()->function->getThisParameter();
+}
+
 Instruction *ESTreeIRGen::emitLoad(
     const ResolvedIdentifier &from,
     bool inhibitThrow) {
@@ -1450,142 +1422,6 @@ void ESTreeIRGen::emitRuntimeError(
     // "throw" is a terminator, so we need to start a new basic block.
     builder.setInsertionBlock(builder.createBasicBlock(builder.getFunction()));
   }
-}
-
-std::shared_ptr<SerializedScope> ESTreeIRGen::resolveScopeIdentifiers(
-    const ScopeChain &chain) {
-  std::shared_ptr<SerializedScope> current{};
-  for (auto it = chain.functions.rbegin(), end = chain.functions.rend();
-       it < end;
-       it++) {
-    auto next = std::make_shared<SerializedScope>();
-    next->variables.reserve(it->variables.size());
-    for (auto var : it->variables) {
-      next->variables.push_back(std::move(Builder.createIdentifier(var)));
-    }
-    next->parentScope = current;
-    current = next;
-  }
-  return current;
-}
-
-void ESTreeIRGen::materializeScopesInChain(
-    Function *wrapperFunction,
-    const std::shared_ptr<const SerializedScope> &scope,
-    int depth) {
-  if (!scope)
-    return;
-  assert(depth < 1000 && "Excessive scope depth");
-
-  // First materialize parent scopes.
-  materializeScopesInChain(wrapperFunction, scope->parentScope, depth - 1);
-
-  // If scope->closureAlias is specified, we must create an alias binding
-  // between originalName (which must be valid) and the variable identified by
-  // closureAlias.
-  //
-  // We do this *before* inserting the other variables below to reflect that
-  // the closure alias is conceptually in an outside scope and also avoid the
-  // closure name incorrectly shadowing the same name inside the closure.
-  if (scope->closureAlias.isValid()) {
-    assert(scope->originalName.isValid() && "Original name invalid");
-    assert(
-        scope->originalName != scope->closureAlias &&
-        "Original name must be different from the alias");
-
-    // NOTE: the closureAlias target must exist and must be a Variable.
-    auto *closureVar = cast<ScopeVar>(nameTable_.lookup(scope->closureAlias));
-
-    // Re-create the alias.
-    nameTable_.insert(scope->originalName, closureVar);
-  }
-
-  // Create an external scope.
-  ExternalScope *ES = Builder.createExternalScope(wrapperFunction, depth);
-  for (auto variableId : scope->variables) {
-    auto *variable =
-        Builder.createVariable(ES, Variable::DeclKind::Var, variableId);
-    nameTable_.insert(variableId, variable);
-  }
-}
-
-/// Scope analysis works through tracking CreateFunctionInst, so we need to
-/// create dummy parents.
-/// This function is not actually used, since lazy compilation and debugging
-/// are disabled.
-static std::pair<Function *, ScopeDesc *> createDummyLexicalParents(
-    IRBuilder &builder,
-    Function *global,
-    const std::shared_ptr<const SerializedScope> &scope,
-    Identifier childName,
-    Function *childFunc) {
-  Function *ourFunc;
-  ScopeDesc *parentDesc;
-  ScopeDesc *ourDesc;
-
-  if (!childFunc) {
-    childFunc = builder.createFunction(
-        childName, Function::DefinitionKind::ES5Function, false, {}, false);
-  }
-
-  if (!scope || !scope->parentScope) {
-    ourFunc = global;
-    parentDesc = nullptr;
-  } else {
-    std::tie(ourFunc, parentDesc) = createDummyLexicalParents(
-        builder, global, scope->parentScope, scope->originalName, nullptr);
-  }
-
-  auto *block = builder.createBasicBlock(ourFunc);
-  builder.setInsertionBlock(block);
-  builder.createUnreachableInst();
-  ourDesc = global->createScopeDesc(parentDesc, ScopeDesc::Kind::Env);
-  auto *scopeVal = builder.createCreateScopeInst(nullptr, ourDesc);
-  auto *inst = builder.createCreateFunctionInst(childFunc, scopeVal, ourDesc);
-  builder.createReturnInst(inst);
-
-  if (scope) {
-    for (auto var : scope->variables) {
-      ourDesc->createVariable(ScopeVar::DeclKind::Var, var);
-    }
-  }
-
-  return {childFunc, ourDesc};
-}
-
-/// Add dummy functions for lexical scope debug info.
-// They are never executed and serve no purpose other than filling in debug
-// info. This is currently necessary because we can't rely on parent bytecode
-// modules for lexical scoping data.
-void ESTreeIRGen::addLexicalDebugInfo(
-    Function *child,
-    Function *global,
-    const std::shared_ptr<const SerializedScope> &scope) {
-  createDummyLexicalParents(Builder, global, scope, Identifier{}, child);
-}
-
-std::shared_ptr<SerializedScope> ESTreeIRGen::serializeScope(
-    FunctionContext *ctx,
-    bool includeGlobal) {
-  // Serialize the global scope if and only if it's the only scope.
-  // We serialize the global scope to avoid re-declaring variables,
-  // and only do it once to avoid creating spurious scopes.
-  if (!ctx || (ctx->function->isGlobalScope() && !includeGlobal))
-    return lexicalScopeChain;
-
-  auto scope = std::make_shared<SerializedScope>();
-  auto *func = ctx->function;
-  assert(func && "Missing function when saving scope");
-
-  scope->originalName = func->getOriginalOrInferredName();
-  if (auto *closure = func->getLazyClosureAlias()) {
-    scope->closureAlias = closure->getName();
-  }
-  for (auto *var : func->getFunctionScope()->getVariables()) {
-    scope->variables.push_back(var->getName());
-  }
-  scope->parentScope = serializeScope(ctx->getPreviousContext(), false);
-  return scope;
 }
 
 } // namespace irgen

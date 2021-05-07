@@ -307,8 +307,12 @@ void HBCISel::generateSingleOperandInst(
 
 void HBCISel::generateDirectEvalInst(DirectEvalInst *Inst, BasicBlock *next) {
   auto dst = encodeValue(Inst);
-  auto src = encodeValue(Inst->getSingleOperand());
-  BCFGen_->emitDirectEval(dst, src);
+  BCFGen_->emitDirectEval(
+      dst,
+      encodeValue(Inst->getEvalScope()),
+      encodeValue(Inst->getThisVal()),
+      encodeValue(Inst->getParam()),
+      Inst->getFlags());
 }
 
 void HBCISel::generateAddEmptyStringInst(

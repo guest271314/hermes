@@ -61,6 +61,15 @@ void FunctionContext::removeAvailableScope(ScopeDesc *desc) {
   availableScopes_.erase(desc);
 }
 
+LocalEvalFlags FunctionContext::deriveLocalEvalFlags() {
+  LocalEvalFlags res{};
+  if (isa<GeneratorInnerFunction>(function))
+    res.paramYield = true;
+  // FIXME: check for async.
+  res.strictMode = function->isStrictMode();
+  return res;
+}
+
 //===----------------------------------------------------------------------===//
 // ESTreeIRGen
 
@@ -80,10 +89,9 @@ void ESTreeIRGen::genFunctionDeclaration(
   assert(
       funcStorage && "function declaration variable should have been hoisted");
 
-  Function *newFunc = func->_async
-      ? genAsyncFunction(functionName, nullptr, func)
-      : func->_generator ? genGeneratorFunction(functionName, nullptr, func)
-                         : genES5Function(functionName, nullptr, func);
+  Function *newFunc = func->_async ? genAsyncFunction(functionName, func)
+      : func->_generator           ? genGeneratorFunction(functionName, func)
+                                   : genES5Function(functionName, func);
 
   // Store the newly created closure into a frame variable with the same name.
   auto *newClosure = Builder.createCreateFunctionInst(
@@ -117,10 +125,9 @@ Value *ESTreeIRGen::genFunctionExpression(
     nameVar = newLocalVar(VarDecl::Kind::ConstVar, originalNameIden);
   }
 
-  Function *newFunc = FE->_async
-      ? genAsyncFunction(originalNameIden, nameVar, FE)
-      : FE->_generator ? genGeneratorFunction(originalNameIden, nameVar, FE)
-                       : genES5Function(originalNameIden, nameVar, FE);
+  Function *newFunc = FE->_async ? genAsyncFunction(originalNameIden, FE)
+      : FE->_generator           ? genGeneratorFunction(originalNameIden, FE)
+                                 : genES5Function(originalNameIden, FE);
 
   Value *closure = Builder.createCreateFunctionInst(
       newFunc, currentIRScope_, currentIRScopeDesc_);
@@ -189,7 +196,6 @@ ESTree::NodeKind getLazyFunctionKind(ESTree::FunctionLikeNode *node) {
 } // namespace
 Function *ESTreeIRGen::genES5Function(
     Identifier originalName,
-    ScopeVar *lazyClosureAlias,
     ESTree::FunctionLikeNode *functionNode,
     bool isGeneratorInnerFunction) {
   assert(functionNode && "Function AST cannot be null");
@@ -212,14 +218,12 @@ Function *ESTreeIRGen::genES5Function(
             /* isGlobal */ false,
             /* insertBefore */ nullptr);
 
-  newFunction->setLazyClosureAlias(lazyClosureAlias);
-
   if (auto *bodyBlock = llvh::dyn_cast<ESTree::BlockStatementNode>(body)) {
     if (bodyBlock->isLazyFunctionBody) {
       assert(
           !isGeneratorInnerFunction &&
           "generator inner function should be included with outer function");
-      setupLazyScope(functionNode, newFunction, body);
+      setupLazySource(functionNode, newFunction, body);
       return newFunction;
     }
   }
@@ -290,7 +294,6 @@ Function *ESTreeIRGen::genES5Function(
 
 Function *ESTreeIRGen::genGeneratorFunction(
     Identifier originalName,
-    ScopeVar *lazyClosureAlias,
     ESTree::FunctionLikeNode *functionNode) {
   assert(functionNode && "Function AST cannot be null");
 
@@ -307,12 +310,11 @@ Function *ESTreeIRGen::genGeneratorFunction(
       ESTree::isStrict(functionNode->strictness),
       functionNode->getSourceRange(),
       /* insertBefore */ nullptr);
-  outerFn->setLazyClosureAlias(lazyClosureAlias);
 
   auto *body = ESTree::getBlockStatement(functionNode);
   if (auto *bodyBlock = llvh::dyn_cast<ESTree::BlockStatementNode>(body)) {
     if (bodyBlock->isLazyFunctionBody) {
-      setupLazyScope(functionNode, outerFn, body);
+      setupLazySource(functionNode, outerFn, body);
       return outerFn;
     }
   }
@@ -330,7 +332,6 @@ Function *ESTreeIRGen::genGeneratorFunction(
     // since it's lexically considered a child function.
     auto *innerFn = genES5Function(
         genAnonymousLabelName(originalName.isValid() ? originalName.str() : ""),
-        nullptr,
         functionNode,
         true);
 
@@ -351,21 +352,19 @@ Function *ESTreeIRGen::genGeneratorFunction(
   return outerFn;
 }
 
-void ESTreeIRGen::setupLazyScope(
+void ESTreeIRGen::setupLazySource(
     ESTree::FunctionLikeNode *functionNode,
     Function *function,
     ESTree::BlockStatementNode *bodyBlock) {
   assert(
       bodyBlock->isLazyFunctionBody &&
-      "setupLazyScope can only be used with lazy function bodies");
+      "setupLazySource can only be used with lazy function bodies");
   // Set the AST position and variable context so we can continue later.
-  function->setLazyScope(saveCurrentScope());
   auto &lazySource = function->getLazySource();
   lazySource.bufferId = bodyBlock->bufferId;
   lazySource.nodeKind = getLazyFunctionKind(functionNode);
   lazySource.functionRange = functionNode->getSourceRange();
-  lazySource.paramYield = bodyBlock->paramYield;
-  lazySource.paramAwait = bodyBlock->paramAwait;
+  lazySource.localEvalFlags = curFunction()->deriveLocalEvalFlags();
 
   // Set the function's .length.
   function->setExpectedParamCountIncludingThis(
@@ -374,7 +373,6 @@ void ESTreeIRGen::setupLazyScope(
 
 Function *ESTreeIRGen::genAsyncFunction(
     Identifier originalName,
-    ScopeVar *lazyClosureAlias,
     ESTree::FunctionLikeNode *functionNode) {
   assert(functionNode && "Function AST cannot be null");
 
@@ -391,13 +389,10 @@ Function *ESTreeIRGen::genAsyncFunction(
       functionNode->getSourceRange(),
       /* insertBefore */ nullptr);
 
-  // Setup lazy compilation
-  asyncFn->setLazyClosureAlias(lazyClosureAlias);
-
   auto *body = ESTree::getBlockStatement(functionNode);
   if (auto *bodyBlock = llvh::dyn_cast<ESTree::BlockStatementNode>(body)) {
     if (bodyBlock->isLazyFunctionBody) {
-      setupLazyScope(functionNode, asyncFn, body);
+      setupLazySource(functionNode, asyncFn, body);
       return asyncFn;
     }
   }
@@ -418,7 +413,6 @@ Function *ESTreeIRGen::genAsyncFunction(
     // since it's lexically considered a child function.
     auto *gen = genGeneratorFunction(
         genAnonymousLabelName(originalName.isValid() ? originalName.str() : ""),
-        lazyClosureAlias,
         functionNode);
 
     auto *genClosure = Builder.createCreateFunctionInst(
@@ -495,6 +489,41 @@ void ESTreeIRGen::emitFunctionPrologue(
 
   // Create variable declarations for each of the hoisted variables and
   // functions. Initialize only the variables to undefined.
+  declareHoisted();
+
+  // Always create the "this" parameter. It needs to be created before we
+  // initialized the ES5 capture state.
+  Builder.createParameter(newFunc, "this");
+
+  if (doInitES5CaptureState != InitES5CaptureState::No)
+    initCaptureStateInES5FunctionHelper();
+
+  // Construct the parameter list. Create function parameters and register
+  // them in the scope.
+  if (doEmitParameters == DoEmitParameters::Yes) {
+    emitParameters(funcNode);
+  } else {
+    newFunc->setExpectedParamCountIncludingThis(
+        countExpectedArgumentsIncludingThis(funcNode));
+  }
+
+  // Generate the code for import declarations before generating the rest of the
+  // body.
+  for (auto importDecl : semInfo->imports) {
+    genImportDeclaration(importDecl);
+  }
+
+  // Generate and initialize the code for the hoisted function declarations
+  // before generating the rest of the body.
+  emitHoistedFunctionDeclarations();
+}
+
+void ESTreeIRGen::declareHoisted() {
+  auto *newFunc = curFunction()->function;
+  auto *semInfo = curFunction()->getSemInfo();
+
+  // Create variable declarations for each of the hoisted variables and
+  // functions. Initialize only the variables to undefined.
   for (auto decl : semInfo->varDecls) {
     auto res = declareVariableOrGlobalProperty(
         newFunc, decl.kind, getNameFieldFromID(decl.identifier));
@@ -524,29 +553,10 @@ void ESTreeIRGen::emitFunctionPrologue(
       Builder.createDeclareGlobalVarInst(globalProp->getName());
     }
   }
+}
 
-  // Always create the "this" parameter. It needs to be created before we
-  // initialized the ES5 capture state.
-  Builder.createParameter(newFunc, "this");
-
-  if (doInitES5CaptureState != InitES5CaptureState::No)
-    initCaptureStateInES5FunctionHelper();
-
-  // Construct the parameter list. Create function parameters and register
-  // them in the scope.
-  if (doEmitParameters == DoEmitParameters::Yes) {
-    emitParameters(funcNode);
-  } else {
-    newFunc->setExpectedParamCountIncludingThis(
-        countExpectedArgumentsIncludingThis(funcNode));
-  }
-
-  // Generate the code for import declarations before generating the rest of the
-  // body.
-  for (auto importDecl : semInfo->imports) {
-    genImportDeclaration(importDecl);
-  }
-
+void ESTreeIRGen::emitHoistedFunctionDeclarations() {
+  auto *semInfo = curFunction()->getSemInfo();
   // Generate and initialize the code for the hoisted function declarations
   // before generating the rest of the body.
   for (auto funcDecl : semInfo->closures) {
@@ -623,20 +633,12 @@ void ESTreeIRGen::emitFunctionEpilogue(Value *returnValue) {
   }
 
   // Delete CreateArgumentsInst if it is unused.
-  if (!curFunction()->createArgumentsInst->hasUsers())
+  if (curFunction()->createArgumentsInst &&
+      !curFunction()->createArgumentsInst->hasUsers()) {
     curFunction()->createArgumentsInst->eraseFromParent();
+  }
 
   curFunction()->function->clearStatementCount();
-}
-
-void ESTreeIRGen::genDummyFunction(Function *dummy) {
-  IRBuilder builder{dummy};
-
-  builder.createParameter(dummy, "this");
-  BasicBlock *firstBlock = builder.createBasicBlock(dummy);
-  builder.setInsertionBlock(firstBlock);
-  builder.createUnreachableInst();
-  builder.createReturnInst(builder.getLiteralUndefined());
 }
 
 /// Generate a function which immediately throws the specified SyntaxError

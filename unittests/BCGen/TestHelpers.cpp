@@ -50,7 +50,7 @@ std::vector<uint8_t> hermes::bytecodeForSource(
   auto bytecodeGenOpts = BytecodeGenerationOptions::defaults();
   bytecodeGenOpts.staticBuiltinsEnabled = flags.staticBuiltins;
   auto BM =
-      generateBytecodeModule(&M, M.getTopLevelFunction(), bytecodeGenOpts);
+      generateBytecodeModule(&M, M.getEntryFunction(), bytecodeGenOpts);
   assert(BM != nullptr && "Failed to generate bytecode module");
 
   /* Serialize it */
