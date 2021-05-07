@@ -63,6 +63,14 @@ struct PropertyFlags {
       /// descriptors synthesized by get*Descriptor methods, and never
       /// set in descriptors stored persistently.
       uint16_t proxyObject : 1;
+      /// This flag is only valid if "writable" is 0. It means that writes to
+      /// the property must throw an exception even in non-strict mode. It
+      /// indicates that a property in a local object scope is an ES6 "const".
+      /// It must only ever be used for properties in local object scopes
+      /// (subclasses of hermes::vm::LocalScope).
+      /// This flag is *NOT* checked by general purpose JSObject routines, it is
+      /// only checked in the implementation of PutDynamic in the interpreter.
+      uint16_t throwOnWrite : 1;
     };
 
     uint16_t _flags;

@@ -2840,6 +2840,22 @@ CallResult<bool> JSObject::updateOwnProperty(
   return true;
 }
 
+void JSObject::updateOwnPropertyToConst(
+    Handle<JSObject> selfHandle,
+    Runtime *runtime,
+    SymbolID name,
+    bool throwOnWrite) {
+  NamedPropertyDescriptor desc;
+  auto findRes = JSObject::findProperty(selfHandle, runtime, name, desc);
+  assert(findRes.hasValue() && "Const property must exist");
+
+  desc.flags.writable = 0;
+  desc.flags.throwOnWrite = throwOnWrite;
+  auto newClazz = HiddenClass::updateProperty(
+      runtime->makeHandle(selfHandle->clazz_), runtime, *findRes, desc.flags);
+  selfHandle->clazz_.set(runtime, *newClazz, &runtime->getHeap());
+}
+
 CallResult<std::pair<JSObject::PropertyUpdateStatus, PropertyFlags>>
 JSObject::checkPropertyUpdate(
     Runtime *runtime,

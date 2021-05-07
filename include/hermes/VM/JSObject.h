@@ -1260,6 +1260,15 @@ class JSObject : public GCCell {
       SymbolID name,
       NamedPropertyDescriptor &desc);
 
+  /// This is a special function used to mark properties in local scopes as
+  /// read-only and optionally throwOnWrite. The property must exist and be
+  /// "ordinary".
+  static void updateOwnPropertyToConst(
+      Handle<JSObject> selfHandle,
+      Runtime *runtime,
+      SymbolID name,
+      bool throwOnWrite);
+
   /// Return the type name of this object, if it can be found heuristically.
   /// There is no one definitive type name for an object. If no heuristic is
   /// able to produce a name, the empty string is returned.
