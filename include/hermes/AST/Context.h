@@ -138,7 +138,7 @@ class Context {
 
   /// If true, every function will be compiled lazily when invoked for the
   /// first time.
-  bool lazyCompilation_{false};
+  // bool lazyCompilation_{false};
 
   /// Even if lazily compiling, eagerly compile any functions under this size in
   /// bytes.
@@ -311,11 +311,14 @@ class Context {
   }
 
   bool isLazyCompilation() const {
-    return lazyCompilation_;
+    // FIXME: TEMPORARILY DISABLED
+    // return lazyCompilation_;
+    return false;
   }
 
   void setLazyCompilation(bool lazyCompilation) {
-    lazyCompilation_ = lazyCompilation;
+    // FIXME: TEMPORARILY DISABLED
+    // lazyCompilation_ = lazyCompilation;
   }
 
   unsigned getPreemptiveFunctionCompilationThreshold() {

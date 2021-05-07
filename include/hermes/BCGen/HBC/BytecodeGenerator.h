@@ -125,7 +125,6 @@ class BytecodeFunctionGenerator : public BytecodeInstructionGenerator {
       ValueKind valueKind,
       bool strictMode,
       uint32_t paramCount,
-      uint32_t environmentSize,
       uint32_t nameID = 0);
 
   unsigned getFunctionID(Function *F);

@@ -88,7 +88,7 @@ void SemanticValidator::visit(VariableDeclaratorNode *varDecl, Node *parent) {
   if (declaration->_kind == kw_.identLet)
     declKind = FunctionInfo::VarDecl::Kind::Let;
   else if (declaration->_kind == kw_.identConst)
-    declKind = FunctionInfo::VarDecl::Kind::Const;
+    declKind = FunctionInfo::VarDecl::Kind::ConstLet;
   else {
     assert(declaration->_kind == kw_.identVar);
     declKind = FunctionInfo::VarDecl::Kind::Var;

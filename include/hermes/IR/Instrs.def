@@ -38,12 +38,18 @@ DEF_VALUE(LoadFrameInst, SingleOperandInst)
 #ifdef INCLUDE_HBC_BACKEND
 DEF_VALUE(HBCLoadConstInst, SingleOperandInst)
 DEF_VALUE(HBCLoadParamInst, SingleOperandInst)
-DEF_VALUE(HBCResolveEnvironment, SingleOperandInst)
 DEF_VALUE(HBCGetArgumentsLengthInst, SingleOperandInst)
 DEF_VALUE(HBCReifyArgumentsInst, SingleOperandInst)
 DEF_VALUE(HBCSpillMovInst, SingleOperandInst)
 #endif
 MARK_LAST(SingleOperandInst)
+
+DEF_VALUE(GetFunctionParentScopeInst, Instruction)
+DEF_VALUE(CreateScopeInst, Instruction)
+DEF_VALUE(GetParentScopeInst, Instruction)
+DEF_VALUE(LoadVariableInst, Instruction)
+DEF_VALUE(StoreVariableInst, Instruction)
+DEF_VALUE(DeclareGlobalVarInst, Instruction)
 
 DEF_VALUE(PhiInst, Instruction)
 DEF_VALUE(BinaryOperatorInst, Instruction)
@@ -78,19 +84,11 @@ DEF_VALUE(ThrowIfEmptyInst, Instruction)
 DEF_VALUE(IteratorBeginInst, Instruction)
 DEF_VALUE(IteratorNextInst, Instruction)
 DEF_VALUE(IteratorCloseInst, Instruction)
-#ifdef INCLUDE_HBC_BACKEND
-DEF_VALUE(HBCStoreToEnvironmentInst, Instruction)
-DEF_VALUE(HBCLoadFromEnvironmentInst, Instruction)
-#endif
 DEF_VALUE(UnreachableInst, Instruction)
 
 MARK_FIRST(CreateFunctionInst)
 DEF_VALUE(CreateFunctionInst, Instruction)
 DEF_VALUE(CreateGeneratorInst, Instruction)
-#ifdef INCLUDE_HBC_BACKEND
-DEF_VALUE(HBCCreateFunctionInst, CreateFunctionInst)
-DEF_VALUE(HBCCreateGeneratorInst, Instruction)
-#endif
 MARK_LAST(CreateFunctionInst)
 
 MARK_FIRST(TerminatorInst)
@@ -128,7 +126,6 @@ DEF_VALUE(ResumeGeneratorInst, Instruction)
 
 #ifdef INCLUDE_HBC_BACKEND
 DEF_VALUE(HBCGetGlobalObjectInst, Instruction)
-DEF_VALUE(HBCCreateEnvironmentInst, Instruction)
 DEF_VALUE(HBCGetThisNSInst, Instruction)
 DEF_VALUE(HBCCreateThisInst, Instruction)
 DEF_VALUE(HBCGetArgumentsPropByValInst, Instruction)

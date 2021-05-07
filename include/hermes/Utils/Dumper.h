@@ -58,6 +58,7 @@ struct IRPrinter : public IRVisitor<IRPrinter, void> {
 
   InstructionNamer InstNamer;
   InstructionNamer BBNamer;
+  InstructionNamer ScopeNamer;
 
   explicit IRPrinter(Context &ctx, llvh::raw_ostream &ost, bool escape = false)
       : Indent(0),
@@ -68,7 +69,6 @@ struct IRPrinter : public IRVisitor<IRPrinter, void> {
   virtual ~IRPrinter() = default;
 
   virtual void printFunctionHeader(Function *F);
-  virtual void printFunctionVariables(Function *F);
   virtual void printValueLabel(Instruction *I, Value *V, unsigned opIndex);
   virtual void printTypeLabel(Type T);
   virtual void printInstruction(Instruction *I);

@@ -202,9 +202,12 @@ DEFINE_OPCODE_3(InstanceOf, Reg8, Reg8, Reg8)
 /// Arg1 = Arg2 in Arg3 (JS relational 'in')
 DEFINE_OPCODE_3(IsIn, Reg8, Reg8, Reg8)
 
-/// Get an environment (scope) from N levels up the stack.
+/// Get an environment (scope) from N levels up the stack starting from Arg2;
 /// 0 is the current environment, 1 is the caller's environment, etc.
-DEFINE_OPCODE_2(GetEnvironment, Reg8, UInt8)
+/// Arg1 = the result scope
+/// Arg2 = the starting scope
+/// Arg3 = how many scopes up to go. 0 return Arg2.
+DEFINE_OPCODE_3(GetEnvironment, Reg8, Reg8, UInt8)
 
 /// Store a value in an environment.
 /// StoreNPToEnvironment[L] store a non-pointer value in an environment
@@ -230,8 +233,14 @@ DEFINE_OPCODE_1(GetGlobalObject, Reg8)
 /// Arg1 = NewTarget
 DEFINE_OPCODE_1(GetNewTarget, Reg8)
 
-/// Create a new environment, to store values captured by closures.
-DEFINE_OPCODE_1(CreateEnvironment, Reg8)
+/// Obtain the enclosing environment of the current function.
+DEFINE_OPCODE_1(GetFunctionEnvironment, Reg8)
+
+/// Create a new environment with the specified parent.
+/// Arg1 = the new environment
+/// Arg2 = the parent environment or undefined for the global one.
+/// Arg3 = the number of slots in the environment.
+DEFINE_OPCODE_3(CreateEnvironment, Reg8, Reg8, UInt16)
 
 /// Declare a global variable by string table index.
 /// The variable will be set to undefined.

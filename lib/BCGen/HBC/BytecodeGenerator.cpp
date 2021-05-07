@@ -98,7 +98,6 @@ BytecodeFunctionGenerator::generateBytecodeFunction(
     ValueKind valueKind,
     bool strictMode,
     uint32_t paramCount,
-    uint32_t environmentSize,
     uint32_t nameID) {
   if (!complete_) {
     bytecodeGenerationComplete();
@@ -112,7 +111,6 @@ BytecodeFunctionGenerator::generateBytecodeFunction(
           bytecodeSize_,
           paramCount,
           frameSize_,
-          environmentSize,
           nameID,
           highestReadCacheIndex_,
           highestWriteCacheIndex_),
@@ -288,7 +286,6 @@ std::unique_ptr<BytecodeModule> BytecodeModuleGenerator::generate() {
         F->getKind(),
         F->isStrictMode(),
         F->getExpectedParamCountIncludingThis(),
-        F->getFunctionScope()->getVariables().size(),
         functionNameId);
 
 #ifndef HERMESVM_LEAN

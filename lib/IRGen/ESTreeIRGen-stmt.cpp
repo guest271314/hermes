@@ -735,7 +735,6 @@ void ESTreeIRGen::genImportDeclaration(
       auto *local = nameTable_.lookup(getNameFieldFromID(ids->_local));
       assert(local && "imported name should have been hoisted");
       emitStore(
-          Builder,
           Builder.createLoadPropertyInst(exports, identDefaultExport_),
           local,
           true);
@@ -745,7 +744,7 @@ void ESTreeIRGen::genImportDeclaration(
       // import * as File from 'file.js';
       auto *local = nameTable_.lookup(getNameFieldFromID(ins->_local));
       assert(local && "imported name should have been hoisted");
-      emitStore(Builder, exports, local, true);
+      emitStore(exports, local, true);
     } else {
       // import {x as y} as File from 'file.js';
       // import {x} as File from 'file.js';
@@ -758,7 +757,6 @@ void ESTreeIRGen::genImportDeclaration(
       // Get is->_imported from the exports object, because that's what the
       // other file stored it as.
       emitStore(
-          Builder,
           Builder.createLoadPropertyInst(
               exports, getNameFieldFromID(is->_imported)),
           local,
@@ -802,7 +800,7 @@ void ESTreeIRGen::genExportNamedDeclaration(
         Identifier name = getNameFieldFromID(variableDeclarator->_id);
 
         Builder.createStorePropertyInst(
-            emitLoad(Builder, nameTable_.lookup(name)), exports, name);
+            emitLoad(nameTable_.lookup(name)), exports, name);
       }
     } else if (
         auto *classDecl = llvh::dyn_cast<ESTree::ClassDeclarationNode>(decl)) {
@@ -815,7 +813,7 @@ void ESTreeIRGen::genExportNamedDeclaration(
       auto *funDecl = llvh::dyn_cast<ESTree::FunctionDeclarationNode>(decl);
       // export function x() {}
       Identifier name = getNameFieldFromID(funDecl->_id);
-      auto *fun = emitLoad(Builder, nameTable_.lookup(name));
+      auto *fun = emitLoad(nameTable_.lookup(name));
       Builder.createStorePropertyInst(fun, exports, name);
     }
 
@@ -859,7 +857,7 @@ void ESTreeIRGen::genExportDefaultDeclaration(
     // The function declaration should have been hoisted,
     // so simply load it and store it in the default slot.
     Identifier name = getNameFieldFromID(funDecl->_id);
-    auto *fun = emitLoad(Builder, nameTable_.lookup(name));
+    auto *fun = emitLoad(nameTable_.lookup(name));
     Builder.createStorePropertyInst(fun, exports, name);
   } else if (
       auto *classDecl = llvh::dyn_cast<ESTree::ClassDeclarationNode>(decl)) {

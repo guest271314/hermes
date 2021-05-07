@@ -243,7 +243,7 @@ std::unique_ptr<BytecodeModule> hbc::generateBytecodeModule(
   assert(BMGen.getEntryPointIndex() != -1 && "Entry point not added");
 
   // Construct the relative function scope depth map.
-  FunctionScopeAnalysis scopeAnalysis{lexicalTopLevel};
+  FunctionScopeAnalysis scopeAnalysis(M);
 
   // Allow reusing the debug cache between functions
   HBCISelDebugCache debugCache;

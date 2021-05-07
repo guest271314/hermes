@@ -58,7 +58,8 @@ void hermes::runFullOptimizationPasses(Module &M) {
   PM.addStackPromotion();
   PM.addMem2Reg();
   PM.addStackPromotion();
-  PM.addInlining();
+  // FIXME: TEMPORARILY DISABLED
+  // PM.addInlining();
   PM.addStackPromotion();
   PM.addInstSimplify();
   PM.addDCE();

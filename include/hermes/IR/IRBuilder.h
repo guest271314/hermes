@@ -270,7 +270,10 @@ class IRBuilder {
 
   AddEmptyStringInst *createAddEmptyStringInst(Value *val);
 
-  CreateFunctionInst *createCreateFunctionInst(Function *code);
+  CreateFunctionInst *createCreateFunctionInst(
+      Function *code,
+      Value *enclosingScope,
+      ScopeDesc *enclosingDesc);
 
   LoadStackInst *createLoadStackInst(AllocStackInst *ptr);
 
@@ -403,6 +406,29 @@ class IRBuilder {
       const SwitchInst::ValueListType &values,
       const SwitchInst::BasicBlockListType &blocks);
 
+  GetFunctionParentScopeInst *createGetFunctionParentScopeInst(
+      ScopeDesc *scopeDesc);
+  CreateScopeInst *createCreateScopeInst(
+      Value *parentScope,
+      ScopeDesc *scopeDesc);
+  GetParentScopeInst *createGetParentScopeInst(
+      Value *startScope,
+      ScopeDesc *startScopeDesc,
+      ScopeDesc *desiredScopeDesc);
+
+  LoadVariableInst *createLoadVariableInst(
+      ScopeVar *var,
+      Value *startScope,
+      ScopeDesc *startScopeDesc);
+
+  StoreVariableInst *createStoreVariableInst(
+      Value *value,
+      ScopeVar *targetVar,
+      Value *startScope,
+      ScopeDesc *startScopeDesc);
+
+  DeclareGlobalVarInst *createDeclareGlobalVarInst(LiteralString *name);
+
   PhiInst *createPhiInst(
       const PhiInst::ValueListType &values,
       const PhiInst::BasicBlockListType &blocks);
@@ -443,7 +469,10 @@ class IRBuilder {
       Value *result,
       BasicBlock *nextBlock);
 
-  CreateGeneratorInst *createCreateGeneratorInst(Function *innerFn);
+  CreateGeneratorInst *createCreateGeneratorInst(
+      Function *innerFn,
+      Value *enclosingScope,
+      ScopeDesc *enclosingDesc);
 
   StartGeneratorInst *createStartGeneratorInst();
 
@@ -452,13 +481,6 @@ class IRBuilder {
   //--------------------------------------------------------------------------//
   //                  Target specific insertions                              //
   //--------------------------------------------------------------------------//
-
-  HBCResolveEnvironment *createHBCResolveEnvironment(VariableScope *scope);
-  HBCStoreToEnvironmentInst *
-  createHBCStoreToEnvironmentInst(Value *env, Value *toPut, Variable *var);
-  HBCLoadFromEnvironmentInst *createHBCLoadFromEnvironmentInst(
-      Value *env,
-      Variable *var);
 
   SwitchImmInst *createSwitchImmInst(
       Value *input,
@@ -471,8 +493,6 @@ class IRBuilder {
   HBCLoadConstInst *createHBCLoadConstInst(Literal *value);
 
   HBCLoadParamInst *createHBCLoadParamInst(LiteralNumber *value);
-
-  HBCCreateEnvironmentInst *createHBCCreateEnvironmentInst();
 
   HBCGetThisNSInst *createHBCGetThisNSInst();
 
@@ -508,14 +528,7 @@ class IRBuilder {
       Value *thisValue,
       ArrayRef<Value *> arguments);
 
-  HBCCreateFunctionInst *createHBCCreateFunctionInst(
-      Function *function,
-      Value *env);
   HBCSpillMovInst *createHBCSpillMovInst(Instruction *value);
-
-  HBCCreateGeneratorInst *createHBCCreateGeneratorInst(
-      Function *function,
-      Value *env);
 
   HBCAllocObjectFromBufferInst *createHBCAllocObjectFromBufferInst(
       HBCAllocObjectFromBufferInst::ObjectPropertyMap prop_map,

@@ -879,6 +879,13 @@ foo();
           "line": 2,
           "col": 1,
           "children": []
+        },
+        {
+          "name": "global",
+          "scriptName": "JavaScript",
+          "line": 2,
+          "col": 1,
+          "children": []
         }
       ]
     }

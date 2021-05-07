@@ -21,7 +21,7 @@ namespace sem {
 class FunctionInfo {
  public:
   struct VarDecl {
-    enum class Kind { Var, Let, Const };
+    enum class Kind { Var, Let, ConstLet, ConstVar };
 
     Kind kind;
     ESTree::IdentifierNode *identifier;

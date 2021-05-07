@@ -34,24 +34,6 @@ using VarDecl = sem::FunctionInfo::VarDecl;
 //===----------------------------------------------------------------------===//
 // Free standing helpers.
 
-/// Emit an instruction to load a value from a specified location.
-/// \param from location to load from, either a Variable or
-/// GlobalObjectProperty. \param inhibitThrow  if true, do not throw when
-/// loading from mmissing global properties. \return the instruction performing
-/// the load.
-Instruction *
-emitLoad(IRBuilder &builder, Value *from, bool inhibitThrow = false);
-
-/// Emit an instruction to a store a value into the specified location.
-/// \param storedValue value to store
-/// \param ptr location to store into, either a Variable or
-///     GlobalObjectProperty.
-/// \param declInit whether this is a declaration initializer, so the TDZ check
-///     should be skipped.
-/// \return the instruction performing the store.
-Instruction *
-emitStore(IRBuilder &builder, Value *storedValue, Value *ptr, bool declInit);
-
 /// Return the name field from ID nodes.
 inline Identifier getNameFieldFromID(const ESTree::Node *ID) {
   return Identifier::getFromPointer(cast<ESTree::IdentifierNode>(ID)->_name);
@@ -79,6 +61,33 @@ struct GotoLabel {
   /// A record on the stack defining the closest surrounding try/catch
   /// statement. We need this so we can call the finally handlers.
   SurroundingTry *surroundingTry = nullptr;
+};
+
+/// An object used to save and restore the lexical scope.
+class LexicalScopeRAII {
+  /// The associated IRGen.
+  ESTreeIRGen *const irGen_;
+  /// Save and restore a scope in ESTreeIRGen::nameTable_.
+  NameTableScopeTy nameTableScope_;
+  /// The current lexical scope descriptor visible to the IR.
+  ScopeDesc *const currentIRScopeDesc_;
+  /// The current scope value available to the IR.
+  Value *const currentIRScope_;
+
+ public:
+  LexicalScopeRAII(const LexicalScopeRAII &) = delete;
+  void operator=(const LexicalScopeRAII &) = delete;
+
+  explicit LexicalScopeRAII(ESTreeIRGen *irGen);
+  ~LexicalScopeRAII();
+
+  /// Insert a global property in the associated name table scope, which must
+  /// be the global scope.
+  ///
+  /// NOTE: this method is needed because there is no other way to get to the
+  /// needed name table scope. We could expose a getter for it, but this way
+  /// is more controlled and documented.
+  void bindGlobalProperty(Identifier name, GlobalObjectProperty *prop);
 };
 
 /// Holds per-function state, specifically label tables. Should be constructed
@@ -110,7 +119,7 @@ class FunctionContext {
   SurroundingTry *surroundingTry = nullptr;
 
   /// A new variable scope that is used throughout the body of the function.
-  NameTableScopeTy scope;
+  LexicalScopeRAII scopeRAII;
 
   /// Stack Register that will hold the return value of the global scope.
   AllocStackInst *globalReturnRegister{nullptr};
@@ -127,7 +136,7 @@ class FunctionContext {
   /// arrow function can use it. Normal functions and constructors store their
   /// "this" in a variable and record it here, if they contain at least one
   /// arrow function. Arrow functions always copy their parent's value.
-  Variable *capturedThis{};
+  ScopeVar *capturedThis{};
 
   /// Captured value of new target. In ES5 functions and ES6 constructors it
   /// is a Variable with the result of GetNewTargetInst executed at the start
@@ -138,7 +147,7 @@ class FunctionContext {
 
   /// Optionally captured value of the eagerly created Arguments object. Used
   /// when arrow functions need to access it.
-  Variable *capturedArguments{};
+  ScopeVar *capturedArguments{};
 
   /// Initialize a new function context, while preserving the previous one.
   /// \param irGen the associated ESTreeIRGen object.
@@ -289,8 +298,9 @@ class LReference {
   ///   it only checks for a local variable.
   bool canStoreWithoutSideEffects() const;
 
-  Variable *castAsVariable() const;
-  GlobalObjectProperty *castAsGlobalObjectProperty() const;
+  /// If the reference contains a named variable or global property,
+  /// return its name.
+  llvh::Optional<Identifier> getNameHint() const;
 
  private:
   /// Self explanatory.
@@ -331,6 +341,7 @@ class LReference {
 class ESTreeIRGen {
   friend class FunctionContext;
   friend class LReference;
+  friend class LexicalScopeRAII;
 
   using BasicBlockListType = llvh::SmallVector<BasicBlock *, 4>;
 
@@ -353,6 +364,10 @@ class ESTreeIRGen {
   /// This is the scoped hash table that saves the mapping between the declared
   /// names and an instance of Varible or GlobalObjectProperty.
   NameTableTy nameTable_{};
+  /// The current lexical scope descriptor visible to the IR.
+  ScopeDesc *currentIRScopeDesc_ = nullptr;
+  /// The current scope value available to the IR.
+  Value *currentIRScope_ = nullptr;
 
   /// Lexical scope chain from the runtime, used to resolve identifiers in local
   /// eval.
@@ -588,9 +603,7 @@ class ESTreeIRGen {
   /// Generate IR for the identifier expression.
   /// We need to know whether it's after typeof (\p afterTypeOf),
   /// to help decide whether a load can throw.
-  Value *genIdentifierExpression(
-      ESTree::IdentifierNode *Iden,
-      bool afterTypeOf);
+  Value *genIdentifierExpression(ESTree::IdentifierNode *ID, bool afterTypeOf);
 
   Value *genMetaProperty(ESTree::MetaPropertyNode *MP);
 
@@ -706,7 +719,7 @@ class ESTreeIRGen {
   /// \returns a new Function.
   Function *genES5Function(
       Identifier originalName,
-      Variable *lazyClosureAlias,
+      ScopeVar *lazyClosureAlias,
       ESTree::FunctionLikeNode *functionNode,
       bool isGeneratorInnerFunction = false);
 
@@ -724,7 +737,7 @@ class ESTreeIRGen {
   /// \return the outer Function.
   Function *genGeneratorFunction(
       Identifier originalName,
-      Variable *lazyClosureAlias,
+      ScopeVar *lazyClosureAlias,
       ESTree::FunctionLikeNode *functionNode);
 
   /// Set the current scope to the lazy scope on \p function
@@ -753,7 +766,7 @@ class ESTreeIRGen {
   /// \return the async Function.
   Function *genAsyncFunction(
       Identifier originalName,
-      Variable *lazyClosureAlias,
+      ScopeVar *lazyClosureAlias,
       ESTree::FunctionLikeNode *functionNode);
 
   /// In the beginning of an ES5 function, initialize the special captured
@@ -817,15 +830,20 @@ class ESTreeIRGen {
     return functionContext_;
   }
 
-  /// Declare a variable or a global propery depending in function \p inFunc,
-  /// depending on whether it is the global scope. Do nothing if the variable
-  /// or property is already declared in that scope.
+  /// Declare a variable or a global property depending on whether \p inFunc
+  /// is the global scope. Do nothing if the variable or property is already
+  /// declared in that scope.
   /// \return A pair. pair.first is the variable, and pair.second is set to true
   ///   if it was declared, false if it already existed.
   std::pair<Value *, bool> declareVariableOrGlobalProperty(
       Function *inFunc,
       VarDecl::Kind declKind,
       Identifier name);
+
+  /// Declare a new variable in the current scope. It should not already exist.
+  /// If \p disableTDZ is Yes, TDZ for this variable will be force-disabled
+  /// regardless of any other setting.
+  ScopeVar *newLocalVar(VarDecl::Kind declKind, Identifier name);
 
   /// Declare a new ambient global property, if not already declared.
   GlobalObjectProperty *declareAmbientGlobalProperty(Identifier name);
@@ -834,13 +852,10 @@ class ESTreeIRGen {
   /// declare them as global properties.
   void processDeclarationFile(ESTree::ProgramNode *programNode);
 
-  /// This method ensures that a variable with the name \p name exists in the
-  /// current scope. The method reports an error if the variable does not exist
-  /// and creates a new variable with this name in the current scope in an
-  /// attempt to recover from the error.
-  /// \return the existing variable or global property, or a freshly created
-  ///   ambient global property in case of error.
-  Value *ensureVariableExists(ESTree::IdentifierNode *id);
+  /// Lookup the identifier \p name. If it is not defined, (optionally) report a
+  /// warning, define an ambient global property (to avoid further warnings) and
+  /// return it.
+  Value *resolveIdentifier(ESTree::IdentifierNode *id);
 
   /// Generate the IR for the property field of the MemberExpressionNode.
   /// The property field may be a string literal or some computed expression.
@@ -1027,6 +1042,35 @@ class ESTreeIRGen {
       Value *value,
       ESTree::Node *init,
       Identifier nameHint);
+
+  /// Create a new scope using the current scope as a parent and set the new
+  /// scope as current.
+  void emitNewScope();
+
+  /// Emit an instruction to load a value from a specified location.
+  /// \param from location to load from, either a Variable or
+  /// GlobalObjectProperty. \param inhibitThrow  if true, do not throw when
+  /// loading from mmissing global properties. \return the instruction
+  /// performing the load.
+  Instruction *emitLoad(Value *from, bool inhibitThrow = false);
+
+  /// Emit an instruction to a store a value into the specified location.
+  /// \param storedValue value to store
+  /// \param ptr location to store into, either a Variable or
+  ///     GlobalObjectProperty.
+  /// \param declInit whether this is a declaration initializer, so the TDZ
+  /// check
+  ///     should be skipped.
+  void emitStore(Value *storedValue, Value *ptr, bool declInit);
+
+  /// Emit code to raise a runtime error of the specified type and with the
+  /// specified message.
+  /// \param errorType  for example "TypeError"
+  /// \param errorMessage
+  static void emitRuntimeError(
+      IRBuilder &builder,
+      StringRef errorType,
+      StringRef errorMessage);
 
  private:
   /// "Converts" a ScopeChain into a SerializedScope by resolving the

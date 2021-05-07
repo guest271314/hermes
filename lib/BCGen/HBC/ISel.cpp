@@ -72,7 +72,7 @@ void HVMRegisterAllocator::allocateCallInst(CallInst *I) {
 unsigned HBCISel::encodeValue(Value *value) {
   if (llvh::isa<Instruction>(value)) {
     return RA_.getRegister(value).getIndex();
-  } else if (auto *var = llvh::dyn_cast<Variable>(value)) {
+  } else if (auto *var = llvh::dyn_cast<ScopeVar>(value)) {
     return var->getIndexInVariableList();
   } else {
     llvm_unreachable("Do not support other value types");
@@ -280,6 +280,7 @@ void HBCISel::addDebugLexicalInfo() {
   // Only emit if debug info is enabled.
   if (F_->getContext().getDebugInfoSetting() != DebugInfoSetting::ALL)
     return;
+  /*
 
   // Set the lexical parent.
   Function *parent = scopeAnalysis_.getLexicalParent(F_);
@@ -290,6 +291,7 @@ void HBCISel::addDebugLexicalInfo() {
   for (const Variable *var : F_->getFunctionScope()->getVariables())
     names.push_back(var->getName());
   BCFGen_->setDebugVariableNames(std::move(names));
+  */
 }
 
 void HBCISel::populatePropertyCachingInfo() {
@@ -429,6 +431,16 @@ void HBCISel::generateUnaryOperatorInst(
       llvm_unreachable("Can't handle this operation");
       break;
   }
+}
+void HBCISel::generateGetFunctionParentScopeInst(
+    GetFunctionParentScopeInst *Inst,
+    BasicBlock *next) {
+  BCFGen_->emitGetFunctionEnvironment(encodeValue(Inst));
+}
+void HBCISel::generateDeclareGlobalVarInst(
+    DeclareGlobalVarInst *Inst,
+    BasicBlock *next) {
+  BCFGen_->emitDeclareGlobalVar(BCFGen_->getIdentifierID(Inst->getName()));
 }
 void HBCISel::generateLoadFrameInst(LoadFrameInst *Inst, BasicBlock *next) {
   llvm_unreachable("LoadFrameInst should have been lowered.");
@@ -766,16 +778,11 @@ void HBCISel::generateCreateArgumentsInst(
     BasicBlock *next) {
   llvm_unreachable("CreateArgumentsInst should have been lowered.");
 }
+
 void HBCISel::generateCreateFunctionInst(
     CreateFunctionInst *Inst,
-    BasicBlock *next) {
-  llvm_unreachable("CreateFunctionInst should have been lowered.");
-}
-
-void HBCISel::generateHBCCreateFunctionInst(
-    HBCCreateFunctionInst *Inst,
     BasicBlock *) {
-  auto env = encodeValue(Inst->getEnvironment());
+  auto env = encodeValue(Inst->getEnclosingScope());
   auto output = encodeValue(Inst);
   auto code = BCFGen_->getFunctionID(Inst->getFunctionCode());
   bool isGen = llvh::isa<GeneratorFunction>(Inst->getFunctionCode());
@@ -906,12 +913,7 @@ void HBCISel::generateSaveAndYieldInst(
 void HBCISel::generateCreateGeneratorInst(
     CreateGeneratorInst *Inst,
     BasicBlock *next) {
-  llvm_unreachable("CreateGeneratorInst should have been lowered");
-}
-void HBCISel::generateHBCCreateGeneratorInst(
-    HBCCreateGeneratorInst *Inst,
-    BasicBlock *next) {
-  auto env = encodeValue(Inst->getEnvironment());
+  auto env = encodeValue(Inst->getEnclosingScope());
   auto output = encodeValue(Inst);
   auto code = BCFGen_->getFunctionID(Inst->getFunctionCode());
   if (LLVM_LIKELY(code <= UINT16_MAX)) {
@@ -1217,36 +1219,44 @@ void HBCISel::generateHBCCallDirectInst(
     BCFGen_->emitCallDirectLongIndex(output, Inst->getNumArguments(), code);
   }
 }
-void HBCISel::generateHBCResolveEnvironment(
-    HBCResolveEnvironment *Inst,
+void HBCISel::generateGetParentScopeInst(
+    GetParentScopeInst *Inst,
     BasicBlock *next) {
-  // We statically determine the relative depth delta of the current scope
-  // and the scope that the variable belongs to. Such delta is used as
-  // the operand to get_scope instruction.
-  VariableScope *instScope = Inst->getScope();
-  Optional<int32_t> instScopeDepth = scopeAnalysis_.getScopeDepth(instScope);
-  Optional<int32_t> curScopeDepth =
-      scopeAnalysis_.getScopeDepth(F_->getFunctionScope());
-  if (!instScopeDepth || !curScopeDepth) {
-    // the function did not have any CreateFunctionInst, this function is dead.
-    emitUnreachableIfDebug();
-    return;
-  }
+  unsigned startDepth = scopeAnalysis_.getScopeDepth(Inst->getStartScopeDesc());
+  unsigned targetDepth =
+      scopeAnalysis_.getScopeDepth(Inst->getDesiredScopeDesc());
+
   assert(
-      curScopeDepth && curScopeDepth.getValue() >= instScopeDepth.getValue() &&
-      "Cannot access variables in inner scopes");
-  int32_t delta = curScopeDepth.getValue() - instScopeDepth.getValue();
-  assert(delta > 0 && "HBCResolveEnvironment for current scope");
-  BCFGen_->emitGetEnvironment(encodeValue(Inst), delta - 1);
+      targetDepth <= startDepth && "Cannot access variables in inner scopes");
+  unsigned delta = startDepth - targetDepth;
+
+  auto resultReg = encodeValue(Inst);
+  auto inputReg = encodeValue(Inst->getStartScope());
+
+  if (delta == 0) {
+    // If the delta is 0, it is just a Mov.
+    if (resultReg != inputReg)
+      BCFGen_->emitMov(resultReg, inputReg);
+  } else {
+    unsigned step;
+    do {
+      step = std::min(delta, (unsigned)UINT8_MAX);
+      BCFGen_->emitGetEnvironment(resultReg, inputReg, step);
+      inputReg = resultReg;
+    } while ((delta -= step) != 0);
+  }
 }
-void HBCISel::generateHBCStoreToEnvironmentInst(
-    HBCStoreToEnvironmentInst *Inst,
+void HBCISel::generateStoreVariableInst(
+    StoreVariableInst *Inst,
     BasicBlock *next) {
-  Variable *var = Inst->getResolvedName();
-  auto valueReg = encodeValue(Inst->getStoredValue());
-  auto envReg = encodeValue(Inst->getEnvironment());
+  ScopeVar *var = Inst->getTargetVar();
+  assert(
+      var->getScope() == Inst->getStartScopeDesc() &&
+      "StoreVariableInst must have been resolved");
+  auto valueReg = encodeValue(Inst->getValue());
+  auto envReg = encodeValue(Inst->getStartScope());
   auto varIdx = encodeValue(var);
-  if (Inst->getStoredValue()->getType().isNonPtr()) {
+  if (Inst->getValue()->getType().isNonPtr()) {
     if (varIdx <= UINT8_MAX) {
       BCFGen_->emitStoreNPToEnvironment(envReg, varIdx, valueReg);
     } else {
@@ -1260,12 +1270,15 @@ void HBCISel::generateHBCStoreToEnvironmentInst(
     }
   }
 }
-void HBCISel::generateHBCLoadFromEnvironmentInst(
-    HBCLoadFromEnvironmentInst *Inst,
+void HBCISel::generateLoadVariableInst(
+    LoadVariableInst *Inst,
     BasicBlock *next) {
   auto dstReg = encodeValue(Inst);
-  Variable *var = Inst->getResolvedName();
-  auto envReg = encodeValue(Inst->getEnvironment());
+  ScopeVar *var = Inst->getVar();
+  assert(
+      var->getScope() == Inst->getStartScopeDesc() &&
+      "LoadVariableInst must have been resolved");
+  auto envReg = encodeValue(Inst->getStartScope());
   auto varIdx = encodeValue(var);
   if (varIdx <= UINT8_MAX) {
     BCFGen_->emitLoadFromEnvironment(dstReg, envReg, varIdx);
@@ -1341,11 +1354,14 @@ void HBCISel::generateHBCLoadParamInst(
   }
 }
 
-void HBCISel::generateHBCCreateEnvironmentInst(
-    hermes::HBCCreateEnvironmentInst *Inst,
+void HBCISel::generateCreateScopeInst(
+    hermes::CreateScopeInst *Inst,
     hermes::BasicBlock *next) {
   auto dstReg = encodeValue(Inst);
-  BCFGen_->emitCreateEnvironment(dstReg);
+  BCFGen_->emitCreateEnvironment(
+      dstReg,
+      encodeValue(Inst->getParentScope()),
+      Inst->getScopeDesc()->getNumVariables());
 }
 
 void HBCISel::generateHBCProfilePointInst(
@@ -1498,19 +1514,7 @@ void HBCISel::generateSwitchImmInst(
   switchImmInfo_[Inst] = {0, Inst->getDefaultDestination(), jmpTable};
 }
 
-void HBCISel::initialize() {
-  IRBuilder builder(F_->getParent());
-  if (F_->isGlobalScope()) {
-    for (auto *prop : F_->getParent()->getGlobalProperties()) {
-      // Declare every "declared" global variable.
-      if (!prop->isDeclared())
-        continue;
-      auto id = BCFGen_->getIdentifierID(
-          builder.getLiteralString(prop->getName()->getValue()));
-      BCFGen_->emitDeclareGlobalVar(id);
-    }
-  }
-}
+void HBCISel::initialize() {}
 
 void HBCISel::generate(BasicBlock *BB, BasicBlock *next) {
   // Register the address of the current basic block.

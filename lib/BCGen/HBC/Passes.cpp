@@ -78,11 +78,6 @@ llvh::SmallVector<Instruction *, 4> getInsertionPointsAfter(
 void updateToEntryInsertionPoint(IRBuilder &builder, Function *F) {
   auto &BB = F->front();
   auto it = BB.begin();
-  auto end = BB.end();
-  // Skip all HBCCreateEnvironmentInst.
-  while (it != end && llvh::isa<HBCCreateEnvironmentInst>(*it))
-    ++it;
-
   builder.setInsertionPoint(&*it);
 }
 
@@ -199,6 +194,9 @@ bool LoadConstants::operandMustBeLiteral(Instruction *Inst, unsigned opIndex) {
     return true;
   }
 
+  if (llvh::isa<DeclareGlobalVarInst>(Inst))
+    return true;
+
   return false;
 }
 
@@ -283,41 +281,9 @@ bool LoadParameters::runOnFunction(Function *F) {
   return changed;
 }
 
-Instruction *LowerLoadStoreFrameInst::getScope(
-    IRBuilder &builder,
-    Variable *var,
-    HBCCreateEnvironmentInst *captureScope) {
-  if (var->getParent()->getFunction() != builder.getFunction()) {
-    // If the variable is neither from the current scope,
-    // we should get the proper scope for it.
-    return builder.createHBCResolveEnvironment(var->getParent());
-  } else {
-    // Now we know that the variable belongs to the current scope.
-    // We are going to conservatively assume the variable might get
-    // captured. Hence we use the newly created scope.
-    // This will not cause performance issue as long as optimization
-    // is enabled, because every variable will be moved to stack
-    // if not being captured.
-    return captureScope;
-  }
-}
-
 bool LowerLoadStoreFrameInst::runOnFunction(Function *F) {
   IRBuilder builder(F);
   bool changed = false;
-
-  updateToEntryInsertionPoint(builder, F);
-
-  // All local captured variables will be stored in this scope (or
-  // "environment").
-  // It will also be used by all closures created in this function, even if
-  // there are no captured variables in this function.
-  // Closures need a new environment even without captured variables because
-  // we currently use only the lexical nesting level to determine which parent
-  // environment to use - we don't account for the case when an environment may
-  // not be needed somewhere along the chain.
-  HBCCreateEnvironmentInst *captureScope =
-      builder.createHBCCreateEnvironmentInst();
 
   for (BasicBlock &BB : F->getBasicBlockList()) {
     for (auto I = BB.begin(), E = BB.end(); I != E; /* nothing */) {
@@ -328,54 +294,33 @@ bool LowerLoadStoreFrameInst::runOnFunction(Function *F) {
       builder.setLocation(Inst->getLocation());
 
       switch (Inst->getKind()) {
-        case ValueKind::LoadFrameInstKind: {
-          auto *LFI = cast<LoadFrameInst>(Inst);
-          auto *var = LFI->getLoadVariable();
+        case ValueKind::LoadVariableInstKind: {
+          auto *LVI = cast<LoadVariableInst>(Inst);
+          auto *var = LVI->getVar();
 
-          builder.setInsertionPoint(Inst);
-          Instruction *scope = getScope(builder, var, captureScope);
-          Instruction *newInst =
-              builder.createHBCLoadFromEnvironmentInst(scope, var);
-
-          Inst->replaceAllUsesWith(newInst);
-          Inst->eraseFromParent();
+          if (var->getScope() != LVI->getStartScopeDesc()) {
+            builder.setInsertionPoint(Inst);
+            auto *resolved = builder.createGetParentScopeInst(
+                LVI->getStartScope(),
+                LVI->getStartScopeDesc(),
+                var->getScope());
+            LVI->updateStartScope(resolved, var->getScope());
+          }
           changed = true;
           break;
         }
-        case ValueKind::StoreFrameInstKind: {
-          auto *SFI = cast<StoreFrameInst>(Inst);
-          auto *var = SFI->getVariable();
-          auto *val = SFI->getValue();
+        case ValueKind::StoreVariableInstKind: {
+          auto *SVI = cast<StoreVariableInst>(Inst);
+          auto *var = SVI->getTargetVar();
 
-          builder.setInsertionPoint(Inst);
-          Instruction *scope = getScope(builder, var, captureScope);
-          builder.createHBCStoreToEnvironmentInst(scope, val, var);
-
-          Inst->eraseFromParent();
-          changed = true;
-          break;
-        }
-        case ValueKind::CreateFunctionInstKind: {
-          auto *CFI = cast<CreateFunctionInst>(Inst);
-
-          builder.setInsertionPoint(Inst);
-          auto *newInst = builder.createHBCCreateFunctionInst(
-              CFI->getFunctionCode(), captureScope);
-
-          Inst->replaceAllUsesWith(newInst);
-          Inst->eraseFromParent();
-          changed = true;
-          break;
-        }
-        case ValueKind::CreateGeneratorInstKind: {
-          auto *CFI = cast<CreateGeneratorInst>(Inst);
-
-          builder.setInsertionPoint(Inst);
-          auto *newInst = builder.createHBCCreateGeneratorInst(
-              CFI->getFunctionCode(), captureScope);
-
-          Inst->replaceAllUsesWith(newInst);
-          Inst->eraseFromParent();
+          if (var->getScope() != SVI->getStartScopeDesc()) {
+            builder.setInsertionPoint(Inst);
+            auto *resolved = builder.createGetParentScopeInst(
+                SVI->getStartScope(),
+                SVI->getStartScopeDesc(),
+                var->getScope());
+            SVI->updateStartScope(resolved, var->getScope());
+          }
           changed = true;
           break;
         }

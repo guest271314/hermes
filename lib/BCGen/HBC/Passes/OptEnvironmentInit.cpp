@@ -24,6 +24,8 @@ namespace hermes {
 namespace hbc {
 
 bool OptEnvironmentInit::runOnFunction(Function *F) {
+#if 0
+// FIXME: TEMPORARILY DISABLED
   IRBuilder builder{F};
   bool changed = false;
 
@@ -79,6 +81,9 @@ bool OptEnvironmentInit::runOnFunction(Function *F) {
   }
 
   return changed;
+#else
+  return false;
+#endif
 }
 
 } // namespace hbc

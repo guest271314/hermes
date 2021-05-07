@@ -2087,10 +2087,8 @@ tailCall:
       }
 
       CASE(GetEnvironment) {
-        // The currently executing function must exist, so get the environment.
-        Environment *curEnv =
-            FRAME.getCalleeClosureUnsafe()->getEnvironment(runtime);
-        for (unsigned level = ip->iGetEnvironment.op2; level; --level) {
+        Environment *curEnv = vmcast<Environment>(O2REG(GetEnvironment));
+        for (unsigned level = ip->iGetEnvironment.op3; level; --level) {
           assert(curEnv && "invalid environment relative level");
           curEnv = curEnv->getParentEnvironment(runtime);
         }
@@ -2099,25 +2097,29 @@ tailCall:
         DISPATCH;
       }
 
-      CASE(CreateEnvironment) {
-        tmpHandle = HermesValue::encodeObjectValue(
+      CASE(GetFunctionEnvironment) {
+        O1REG(GetFunctionEnvironment) = HermesValue::encodeObjectValue(
             FRAME.getCalleeClosureUnsafe()->getEnvironment(runtime));
-
+        ip = NEXTINST(GetFunctionEnvironment);
+        DISPATCH;
+      }
+      CASE(CreateEnvironment) {
         CAPTURE_IP(
             res = Environment::create(
                 runtime,
-                tmpHandle->getPointer() ? Handle<Environment>::vmcast(tmpHandle)
-                                        : Handle<Environment>::vmcast_or_null(
-                                              &runtime->nullPointer_),
-                curCodeBlock->getEnvironmentSize()));
+                O2REG(CreateEnvironment).isObject()
+                    ? Handle<Environment>::vmcast(&O2REG(CreateEnvironment))
+                    : Handle<Environment>::vmcast_or_null(
+                          &runtime->nullPointer_),
+                ip->iCreateEnvironment.op3));
         if (res == ExecutionStatus::EXCEPTION) {
           goto exception;
         }
         O1REG(CreateEnvironment) = *res;
 #ifdef HERMES_ENABLE_DEBUGGER
-        FRAME.getDebugEnvironmentRef() = *res;
+        if (FRAME.getDebugEnvironmentRef().isUndefined())
+          FRAME.getDebugEnvironmentRef() = *res;
 #endif
-        tmpHandle = HermesValue::encodeUndefinedValue();
         gcScope.flushToSmallCount(KEEP_HANDLES);
         ip = NEXTINST(CreateEnvironment);
         DISPATCH;

@@ -321,8 +321,11 @@ AddEmptyStringInst *IRBuilder::createAddEmptyStringInst(Value *val) {
   return I;
 }
 
-CreateFunctionInst *IRBuilder::createCreateFunctionInst(Function *code) {
-  auto CFI = new CreateFunctionInst(code);
+CreateFunctionInst *IRBuilder::createCreateFunctionInst(
+    Function *code,
+    Value *enclosingScope,
+    ScopeDesc *enclosingDesc) {
+  auto CFI = new CreateFunctionInst(code, enclosingScope, enclosingDesc);
   insert(CFI);
   return CFI;
 }
@@ -623,6 +626,57 @@ SwitchInst *IRBuilder::createSwitchInst(
   return SI;
 }
 
+GetFunctionParentScopeInst *IRBuilder::createGetFunctionParentScopeInst(
+    ScopeDesc *scopeDesc) {
+  auto *I = new GetFunctionParentScopeInst(scopeDesc);
+  insert(I);
+  return I;
+}
+CreateScopeInst *IRBuilder::createCreateScopeInst(
+    Value *parentScope,
+    ScopeDesc *scopeDesc) {
+  auto *I = new CreateScopeInst(
+      parentScope ? parentScope : getLiteralUndefined(), scopeDesc);
+  insert(I);
+  return I;
+}
+
+GetParentScopeInst *IRBuilder::createGetParentScopeInst(
+    Value *startScope,
+    ScopeDesc *startScopeDesc,
+    ScopeDesc *desiredScopeDesc) {
+  auto *I =
+      new GetParentScopeInst(startScope, startScopeDesc, desiredScopeDesc);
+  insert(I);
+  return I;
+}
+
+LoadVariableInst *IRBuilder::createLoadVariableInst(
+    ScopeVar *var,
+    Value *startScope,
+    ScopeDesc *startScopeDesc) {
+  auto *I = new LoadVariableInst(var, startScope, startScopeDesc);
+  insert(I);
+  return I;
+}
+
+StoreVariableInst *IRBuilder::createStoreVariableInst(
+    Value *value,
+    ScopeVar *targetVar,
+    Value *startScope,
+    ScopeDesc *startScopeDesc) {
+  auto *I = new StoreVariableInst(value, targetVar, startScope, startScopeDesc);
+  insert(I);
+  return I;
+}
+
+DeclareGlobalVarInst *IRBuilder::createDeclareGlobalVarInst(
+    LiteralString *name) {
+  auto *I = new DeclareGlobalVarInst(name);
+  insert(I);
+  return I;
+}
+
 PhiInst *IRBuilder::createPhiInst() {
   PhiInst::ValueListType values;
   PhiInst::BasicBlockListType blocks;
@@ -710,8 +764,11 @@ SaveAndYieldInst *IRBuilder::createSaveAndYieldInst(
   return I;
 }
 
-CreateGeneratorInst *IRBuilder::createCreateGeneratorInst(Function *innerFn) {
-  auto *I = new CreateGeneratorInst(innerFn);
+CreateGeneratorInst *IRBuilder::createCreateGeneratorInst(
+    Function *innerFn,
+    Value *enclosingScope,
+    ScopeDesc *enclosingDesc) {
+  auto *I = new CreateGeneratorInst(innerFn, enclosingScope, enclosingDesc);
   insert(I);
   return I;
 }
@@ -726,30 +783,6 @@ ResumeGeneratorInst *IRBuilder::createResumeGeneratorInst(Value *isReturn) {
   auto *I = new ResumeGeneratorInst(isReturn);
   insert(I);
   return I;
-}
-
-HBCResolveEnvironment *IRBuilder::createHBCResolveEnvironment(
-    VariableScope *scope) {
-  auto RSC = new HBCResolveEnvironment(scope);
-  insert(RSC);
-  return RSC;
-}
-
-HBCStoreToEnvironmentInst *IRBuilder::createHBCStoreToEnvironmentInst(
-    Value *env,
-    Value *toPut,
-    Variable *var) {
-  auto PSI = new HBCStoreToEnvironmentInst(env, toPut, var);
-  insert(PSI);
-  return PSI;
-}
-
-HBCLoadFromEnvironmentInst *IRBuilder::createHBCLoadFromEnvironmentInst(
-    Value *env,
-    Variable *var) {
-  auto GSI = new HBCLoadFromEnvironmentInst(env, var);
-  insert(GSI);
-  return GSI;
 }
 
 SwitchImmInst *IRBuilder::createSwitchImmInst(
@@ -779,12 +812,6 @@ HBCLoadConstInst *IRBuilder::createHBCLoadConstInst(Literal *value) {
 
 HBCLoadParamInst *IRBuilder::createHBCLoadParamInst(LiteralNumber *value) {
   auto inst = new HBCLoadParamInst(value);
-  insert(inst);
-  return inst;
-}
-
-HBCCreateEnvironmentInst *IRBuilder::createHBCCreateEnvironmentInst() {
-  auto inst = new HBCCreateEnvironmentInst();
   insert(inst);
   return inst;
 }
@@ -868,24 +895,8 @@ HBCCallDirectInst *IRBuilder::createHBCCallDirectInst(
   return inst;
 }
 
-HBCCreateFunctionInst *IRBuilder::createHBCCreateFunctionInst(
-    Function *function,
-    Value *env) {
-  auto inst = new HBCCreateFunctionInst(function, env);
-  insert(inst);
-  return inst;
-}
-
 HBCSpillMovInst *IRBuilder::createHBCSpillMovInst(Instruction *value) {
   auto *inst = new HBCSpillMovInst(value);
-  insert(inst);
-  return inst;
-}
-
-HBCCreateGeneratorInst *IRBuilder::createHBCCreateGeneratorInst(
-    Function *function,
-    Value *env) {
-  auto *inst = new HBCCreateGeneratorInst(function, env);
   insert(inst);
   return inst;
 }

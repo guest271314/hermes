@@ -208,59 +208,46 @@ BasicBlock *LoopAnalysis::getLoopPreheader(const BasicBlock *BB) const {
   return nullptr;
 }
 
-FunctionScopeAnalysis::ScopeData
-FunctionScopeAnalysis::calculateFunctionScopeData(Function *F) {
-  if (lexicalScopeMap_.find(F) == lexicalScopeMap_.end()) {
-    // If the function is a CommonJS module,
-    // then it won't have a CreateFunctionInst, so calculate the depth manually.
-    Module *module = F->getParent();
-    if (module->findCJSModule(F)) {
-      return ScopeData{module->getTopLevelFunction(), 1, false};
-    }
+FunctionScopeAnalysis::FunctionScopeAnalysis(Module *mod) {
+  llvh::SmallVector<const ScopeDesc *, 4> stack{};
 
-    // To find the scope data of a function, we try to locate the
-    // CreateFunctionInst that creates this function. The scope of F
-    // will be 1 more than the scope depth of the CreateFunctionInst.
-    const CreateFunctionInst *Inst = nullptr;
-    for (auto *user : F->getUsers()) {
-      if (llvh::isa<CreateFunctionInst>(user)) {
-        assert(Inst == nullptr && "Function has multiple CreateFunctionInst");
-        Inst = llvh::dyn_cast<CreateFunctionInst>(user);
+  for (auto &F : mod->getFunctionList()) {
+    for (const ScopeDesc *SD : F.getScopes()) {
+      // Depth already known?
+      if (depthMap_.count(SD))
+        continue;
+
+      // Find the first parent with known depth, pushing all scopes with
+      // unknown depth to the stack. When the loop exists, "depth" contains
+      // the last known depth + 1.
+      stack.clear();
+      auto *cur = SD;
+      unsigned depth;
+      for (;;) {
+        stack.push_back(cur);
+        if (!(cur = cur->getParent())) {
+          depth = 0;
+          break;
+        }
+        auto it = depthMap_.find(cur);
+        if (it != depthMap_.end()) {
+          depth = it->second + 1;
+          break;
+        }
       }
-    }
-    // Because the calculation is done lazily, any function requested
-    // must have a CreateFunctionInst.
-    if (Inst == nullptr) {
-      LLVM_DEBUG(
-          dbgs() << "Function \"" << F->getInternalName()
-                 << "\" has no CreateFunctionInst\n");
-      lexicalScopeMap_[F] = ScopeData::orphan();
-      return lexicalScopeMap_[F];
-    }
-    Function *Parent = Inst->getParent()->getParent();
-    ScopeData parentData = calculateFunctionScopeData(Parent);
-    if (!parentData.orphaned) {
-      lexicalScopeMap_[F] = ScopeData(Parent, parentData.depth + 1);
-    } else {
-      lexicalScopeMap_[F] = ScopeData::orphan();
-    }
-  }
-  return lexicalScopeMap_[F];
-}
 
-Optional<int32_t> FunctionScopeAnalysis::getScopeDepth(VariableScope *VS) {
-  if (ExternalScope *ES = llvh::dyn_cast<ExternalScope>(VS)) {
-    return ES->getDepth();
-  } else {
-    ScopeData sd = calculateFunctionScopeData(VS->getFunction());
-    if (sd.orphaned)
-      return llvh::None;
-    return sd.depth;
+      do {
+        depthMap_[stack.pop_back_val()] = depth;
+        ++depth;
+      } while (!stack.empty());
+    }
   }
 }
 
-Function *FunctionScopeAnalysis::getLexicalParent(Function *F) {
-  return calculateFunctionScopeData(F).parent;
+unsigned FunctionScopeAnalysis::getScopeDepth(const ScopeDesc *SD) const {
+  auto it = depthMap_.find(SD);
+  assert(it != depthMap_.end() && "ScopeDesc not found in depth map");
+  return it->second;
 }
 
 #undef DEBUG_TYPE

@@ -61,7 +61,7 @@ void ESTreeIRGen::genTryStatement(ESTree::TryStatementNode *tryStmt) {
 
           // Catch takes a exception variable, hence we need to create a new
           // scope for it.
-          NameTableScopeTy newScope(nameTable_);
+          LexicalScopeRAII saveScope(this);
 
           Builder.setLocation(tryStmt->_handler->getDebugLoc());
           prepareCatch(catchClauseNode->_param);
@@ -102,29 +102,15 @@ CatchInst *ESTreeIRGen::prepareCatch(ESTree::NodePtr catchParam) {
     return nullptr;
   }
 
-  auto catchVariableName =
-      getNameFieldFromID(cast<ESTree::IdentifierNode>(catchParam));
+  // Create a new lexical scope.
+  emitNewScope();
 
-  // Generate a unique catch variable name and use this name for IRGen purpose
-  // only. The variable lookup in the catch clause will continue to be done
-  // using the declared name.
-  auto uniquedCatchVariableName =
-      genAnonymousLabelName(catchVariableName.str());
+  // Declare the catch variable.
+  auto *catchVar = newLocalVar(
+      VarDecl::Kind::Var,
+      getNameFieldFromID(cast<ESTree::IdentifierNode>(catchParam)));
 
-  auto errorVar = Builder.createVariable(
-      curFunction()->function->getFunctionScope(),
-      Variable::DeclKind::Var,
-      uniquedCatchVariableName);
-
-  /// Insert the synthesized variable into the function name table, so it can
-  /// be looked up internally.
-  nameTable_.insertIntoScope(
-      &curFunction()->scope, errorVar->getName(), errorVar);
-
-  // Alias the lexical name to the synthesized variable.
-  nameTable_.insert(catchVariableName, errorVar);
-
-  emitStore(Builder, catchInst, errorVar, true);
+  emitStore(catchInst, catchVar, true);
   return catchInst;
 }
 

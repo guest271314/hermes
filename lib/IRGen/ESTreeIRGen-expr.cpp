@@ -131,7 +131,7 @@ Value *ESTreeIRGen::genExpression(ESTree::Node *expr, Identifier nameHint) {
       assert(
           curFunction()->capturedThis &&
           "arrow function must have a captured this");
-      return Builder.createLoadFrameInst(curFunction()->capturedThis);
+      return emitLoad(curFunction()->capturedThis);
     }
     return curFunction()->function->getThisParameter();
   }
@@ -1397,11 +1397,8 @@ Value *ESTreeIRGen::genAssignmentExpr(ESTree::AssignmentExpressionNode *AE) {
   LReference lref = createLRef(AE->_left, false);
 
   Identifier nameHint{};
-  if (auto *var = lref.castAsVariable()) {
-    nameHint = var->getName();
-  } else if (auto *globProp = lref.castAsGlobalObjectProperty()) {
-    nameHint = globProp->getName()->getValue();
-  }
+  if (auto optHint = lref.getNameHint())
+    nameHint = *optHint;
 
   Value *result;
   if (AssignmentKind == BinaryOperatorInst::OpKind::AssignShortCircuitOrKind ||
@@ -1510,46 +1507,34 @@ Value *ESTreeIRGen::genConditionalExpr(ESTree::ConditionalExpressionNode *C) {
 }
 
 Value *ESTreeIRGen::genIdentifierExpression(
-    ESTree::IdentifierNode *Iden,
+    ESTree::IdentifierNode *ID,
     bool afterTypeOf) {
-  LLVM_DEBUG(dbgs() << "Looking for identifier \"" << Iden->_name << "\"\n");
+  LLVM_DEBUG(dbgs() << "Looking for identifier \"" << ID->_name << "\"\n");
+
+  Identifier name = getNameFieldFromID(ID);
 
   // 'arguments' is an array-like object holding all function arguments.
   // If one of the parameters is called "arguments" then it shadows the
   // arguments keyword.
-  if (Iden->_name->str() == "arguments" &&
-      !nameTable_.count(getNameFieldFromID(Iden))) {
+  if (name.str() == "arguments" && !nameTable_.count(name)) {
     // If it is captured, we must use the captured value.
     if (curFunction()->capturedArguments) {
-      return Builder.createLoadFrameInst(curFunction()->capturedArguments);
+      return emitLoad(curFunction()->capturedArguments);
     }
 
     return curFunction()->createArgumentsInst;
   }
 
-  // Lookup variable name.
-  auto StrName = getNameFieldFromID(Iden);
-
-  auto *Var = ensureVariableExists(Iden);
+  auto *var = resolveIdentifier(ID);
 
   // For uses of undefined as the global property, we make an optimization
   // to always return undefined constant.
-  if (llvh::isa<GlobalObjectProperty>(Var) && StrName.str() == "undefined") {
+  if (llvh::isa<GlobalObjectProperty>(var) && name.str() == "undefined") {
     return Builder.getLiteralUndefined();
   }
 
-  LLVM_DEBUG(
-      dbgs() << "Found variable " << StrName << " in function \""
-             << (llvh::isa<GlobalObjectProperty>(Var)
-                     ? StringRef("global")
-                     : cast<Variable>(Var)
-                           ->getParent()
-                           ->getFunction()
-                           ->getInternalNameStr())
-             << "\"\n");
-
   // Typeof <variable> does not throw.
-  return emitLoad(Builder, Var, afterTypeOf);
+  return emitLoad(var, afterTypeOf);
 }
 
 Value *ESTreeIRGen::genMetaProperty(ESTree::MetaPropertyNode *MP) {
@@ -1568,8 +1553,8 @@ Value *ESTreeIRGen::genMetaProperty(ESTree::MetaPropertyNode *MP) {
       }
 
       // If it is a variable, we must issue a load.
-      if (auto *V = llvh::dyn_cast<Variable>(value))
-        return Builder.createLoadFrameInst(V);
+      if (auto *V = llvh::dyn_cast<ScopeVar>(value))
+        return emitLoad(V);
 
       return value;
     }

@@ -1201,6 +1201,161 @@ struct ilist_alloc_traits<::hermes::BasicBlock> {
 
 namespace hermes {
 
+class ScopeDesc;
+
+//===----------------------------------------------------------------------===//
+// class ScopeVar
+
+/// This represents a JavaScript variable allocated in a scope.
+class ScopeVar : public Value {
+  friend class ScopeDesc;
+
+ public:
+  enum class DeclKind {
+    Var,
+    Let,
+    /// A ES6 "const" declaration. Always throws TypeError on modification.
+    ConstLet,
+    /// A const variable that only throws TypeError in strict mode.
+    ConstVar,
+  };
+
+  /// Return true if this DeclKind needs to track TDZ.
+  static bool declKindNeedsTDZ(DeclKind dk) {
+    return dk == DeclKind::Let || dk == DeclKind::ConstLet;
+  }
+
+  static bool declKindReadOnly(DeclKind dk) {
+    return dk >= DeclKind::ConstLet;
+  }
+
+ private:
+  /// The scope that owns the variable.
+  ScopeDesc *scope_;
+
+  /// Declaration kind: var/let/const.
+  DeclKind declKind_;
+
+  /// If true, this variable obeys the TDZ rules.
+  bool obeysTDZ_ = false;
+
+  /// The textual representation of the variable in the JavaScript program.
+  Identifier name_;
+
+  ScopeVar(const ScopeVar &) = delete;
+  void operator=(const ScopeVar &) = delete;
+
+  explicit ScopeVar(ScopeDesc *scope, DeclKind declKind, Identifier name)
+      : Value(ValueKind::ScopeVarKind),
+        scope_(scope),
+        declKind_(declKind),
+        name_(name) {}
+
+ public:
+  ~ScopeVar() = default;
+
+  DeclKind getDeclKind() const {
+    return declKind_;
+  }
+
+  Identifier getName() const {
+    return name_;
+  }
+  ScopeDesc *getScope() const {
+    return scope_;
+  }
+
+  bool getObeysTDZ() const {
+    return obeysTDZ_;
+  }
+  void setObeysTDZ(bool value) {
+    obeysTDZ_ = value;
+  }
+
+  bool isReadOnly() const {
+    return declKindReadOnly(declKind_);
+  }
+
+  static bool classof(const Value *V) {
+    return V->getKind() == ValueKind::ScopeVarKind;
+  }
+
+  /// Return the index of this variable in the function's variable list.
+  unsigned getIndexInVariableList() const;
+};
+
+//===----------------------------------------------------------------------===//
+// class ScopeDesc
+
+/// Describes the variables in a scope and the parent scope.
+class ScopeDesc : public Value {
+  friend class Function;
+
+  using Value::Value;
+  using VariableListType = llvh::SmallVector<ScopeVar *, 8>;
+  using ScopeListType = llvh::SmallVector<ScopeDesc *, 2>;
+
+  /// The function owning the scope.
+  Function *function_;
+
+  /// The parent scope.
+  ScopeDesc *parent_;
+
+  /// The variables associated with this scope.
+  VariableListType variables_{};
+
+  /// Child scopes.
+  ScopeListType childScopes_{};
+
+  explicit ScopeDesc(Function *function, ScopeDesc *parent);
+
+ public:
+  ~ScopeDesc();
+
+  ScopeVar *createVariable(ScopeVar::DeclKind declKind, Identifier name);
+
+  Function *getFunction() const {
+    return function_;
+  }
+  ScopeDesc *getParent() const {
+    return parent_;
+  }
+  const ScopeListType &getChildScopes() const {
+    return childScopes_;
+  }
+
+  /// \returns a list of variables.
+  VariableListType &getVariables() {
+    return variables_;
+  }
+
+  static bool classof(const Value *V) {
+    return V->getKind() == ValueKind::ScopeDescKind;
+  }
+
+  /// \return the 0-based index in the variable list.
+  unsigned findIndexInVariableList(const ScopeVar *var) const;
+
+  unsigned getNumVariables() const {
+    return variables_.size();
+  }
+
+ private:
+  void addChild(ScopeDesc *child) {
+    childScopes_.push_back(child);
+  }
+
+  void removeChild(ScopeDesc *child) {
+    auto ci = std::find(childScopes_.begin(), childScopes_.end(), child);
+    assert(ci != childScopes_.end() && "removing a non-child");
+    childScopes_.erase(ci);
+  }
+};
+
+inline unsigned ScopeVar::getIndexInVariableList() const {
+  return scope_->findIndexInVariableList(this);
+}
+
 /// VariableScope is a lexical scope.
 class VariableScope : public Value {
   using Value::Value;
@@ -1309,6 +1464,9 @@ class Function : public llvh::ilist_node_with_parent<Function, Module>,
   /// The function scope - it is always the first scope in the scope list.
   VariableScope functionScope_;
 
+  /// The lexical scopes owned by this function.
+  llvh::SmallVector<ScopeDesc *, 4> scopes_{};
+
   /// The basic blocks in this function.
   BasicBlockListType BasicBlockList{};
   /// The function parameters.
@@ -1368,7 +1526,7 @@ class Function : public llvh::ilist_node_with_parent<Function, Module>,
   ///
   /// When we generate the `function bar() {...}`, this field will be set to
   /// the `anon_0_closure` variable to capture this relationship.
-  Variable *lazyClosureAlias_{};
+  ScopeVar *lazyClosureAlias_{};
 #endif
 
  protected:
@@ -1463,6 +1621,17 @@ class Function : public llvh::ilist_node_with_parent<Function, Module>,
     return &functionScope_;
   }
 
+  /// Create a new scope owned by this function.
+  ScopeDesc *createScopeDesc(ScopeDesc *parentScope);
+
+  /// \return the list of scopes owned by this function.
+  const llvh::ArrayRef<ScopeDesc *> getScopes() {
+    return scopes_;
+  }
+  const llvh::ArrayRef<const ScopeDesc *> getScopes() const {
+    return scopes_;
+  }
+
   void addBlock(BasicBlock *BB);
   void addParameter(Parameter *A);
 
@@ -1549,10 +1718,10 @@ class Function : public llvh::ilist_node_with_parent<Function, Module>,
     return lazyScope_;
   }
 
-  void setLazyClosureAlias(Variable *var) {
+  void setLazyClosureAlias(ScopeVar *var) {
     lazyClosureAlias_ = var;
   }
-  Variable *getLazyClosureAlias() const {
+  ScopeVar *getLazyClosureAlias() const {
     return lazyClosureAlias_;
   }
 #endif

@@ -115,6 +115,9 @@ class Verifier : public InstructionVisitor<Verifier, void> {
   }
 };
 
+/// This flag be temporarily to true for easier debugging.
+static constexpr bool AbortOnFail = false;
+
 // TODO: Need to make this accept format strings
 #define Assert(C, ...)                                              \
   do {                                                              \
@@ -125,6 +128,8 @@ class Verifier : public InstructionVisitor<Verifier, void> {
            << functionState->function.getInternalNameStr() << '\n'; \
       else                                                          \
         OS << (__VA_ARGS__) << '\n';                                \
+      if (AbortOnFail)                                              \
+        abort();                                                    \
       return;                                                       \
     }                                                               \
   } while (0)
@@ -178,9 +183,10 @@ void Verifier::visitFunction(const Function &F) {
 
     // Instruction dominance check
     for (BasicBlock::const_iterator II = I.begin(); II != I.end(); II++) {
+      auto *curInst = &*II;
       // Check that incoming phi node values are dominated in their incoming
       // blocks.
-      if (auto *Phi = llvh::dyn_cast<PhiInst>(&*II)) {
+      if (auto *Phi = llvh::dyn_cast<PhiInst>(curInst)) {
         for (int i = 0, e = Phi->getNumEntries(); i < e; ++i) {
           auto pair = Phi->getEntry(i);
           BasicBlock *block = pair.second;
@@ -200,15 +206,15 @@ void Verifier::visitFunction(const Function &F) {
       }
 
       // Check that all instructions are dominated by their operands.
-      for (unsigned i = 0; i < II->getNumOperands(); i++) {
-        auto Operand = II->getOperand(i);
+      for (unsigned i = 0; i < curInst->getNumOperands(); i++) {
+        auto Operand = curInst->getOperand(i);
         if (auto *InstOp = llvh::dyn_cast<Instruction>(Operand)) {
           Assert(
-              seen.count(InstOp) || D.properlyDominates(InstOp, &*II),
-              "Operand must dominates the Instruction");
+              seen.count(InstOp) || D.properlyDominates(InstOp, curInst),
+              "Operand must dominate the Instruction");
         }
       }
-      seen.insert(&*II);
+      seen.insert(curInst);
     }
   }
 }
@@ -252,13 +258,11 @@ void Verifier::beforeVisitInstruction(const Instruction &Inst) {
     Assert(
         getUsersSetForValue(Operand).count(&Inst) == 1,
         "This instruction is not in the User list of the operand");
-    if (llvh::isa<Variable>(Operand)) {
+    if (llvh::isa<ScopeVar>(Operand)) {
       Assert(
-          llvh::isa<LoadFrameInst>(Inst) || llvh::isa<StoreFrameInst>(Inst) ||
-              llvh::isa<HBCLoadFromEnvironmentInst>(Inst) ||
-              llvh::isa<HBCStoreToEnvironmentInst>(Inst),
-          "Variable can only be accessed in "
-          "LoadFrame/StoreFrame/HBCLoadFromEnvironmentInst/HBCStoreToEnvironmentInst Inst.");
+          llvh::isa<LoadVariableInst>(Inst) ||
+              llvh::isa<StoreVariableInst>(Inst),
+          "Variable can only be accessed in LoadVariableInst/StoreVariableInst.");
     }
     if (llvh::isa<AllocStackInst>(Operand)) {
       Assert(
@@ -316,18 +320,6 @@ void Verifier::visitBranchInst(const BranchInst &Inst) {
   Assert(
       pred_contains(Inst.getBranchDest(), Inst.getParent()),
       "BranchInst Basic Block not in the predecessor list of target block");
-}
-
-void Verifier::visitHBCStoreToEnvironmentInst(
-    const HBCStoreToEnvironmentInst &Inst) {
-  // Nothing to verify at this point.
-}
-void Verifier::visitHBCLoadFromEnvironmentInst(
-    const HBCLoadFromEnvironmentInst &Inst) {
-  // Nothing to verify at this point.
-}
-void Verifier::visitHBCResolveEnvironment(const HBCResolveEnvironment &Inst) {
-  // Nothing to verify at this point.
 }
 
 void Verifier::visitAsNumberInst(const AsNumberInst &Inst) {
@@ -734,11 +726,6 @@ void Verifier::visitDirectEvalInst(DirectEvalInst const &Inst) {
   // Nothing to verify at this point.
 }
 
-void Verifier::visitHBCCreateEnvironmentInst(
-    const HBCCreateEnvironmentInst &Inst) {
-  // Nothing to verify at this point.
-}
-
 void Verifier::visitHBCProfilePointInst(const HBCProfilePointInst &Inst) {
   // Nothing to verify at this point.
 }
@@ -781,10 +768,6 @@ void Verifier::visitStartGeneratorInst(const StartGeneratorInst &Inst) {
 }
 void Verifier::visitResumeGeneratorInst(const ResumeGeneratorInst &Inst) {}
 
-void Verifier::visitHBCCreateGeneratorInst(const HBCCreateGeneratorInst &Inst) {
-  visitCreateGeneratorInst(Inst);
-}
-
 void Verifier::visitHBCGetThisNSInst(const HBCGetThisNSInst &Inst) {
   // Nothing to verify at this point.
 }
@@ -804,9 +787,6 @@ void Verifier::visitHBCCreateThisInst(const HBCCreateThisInst &Inst) {}
 void Verifier::visitHBCGetConstructedObjectInst(
     const HBCGetConstructedObjectInst &Inst) {}
 
-void Verifier::visitHBCCreateFunctionInst(const HBCCreateFunctionInst &Inst) {
-  visitCreateFunctionInst(Inst);
-}
 void Verifier::visitHBCSpillMovInst(const HBCSpillMovInst &Inst) {}
 void Verifier::visitUnreachableInst(const UnreachableInst &Inst) {}
 
@@ -836,6 +816,14 @@ void Verifier::visitGetNewTargetInst(GetNewTargetInst const &Inst) {
 }
 
 void Verifier::visitThrowIfEmptyInst(const ThrowIfEmptyInst &Inst) {}
+
+void Verifier::visitGetParentScopeInst(const GetParentScopeInst &Inst) {}
+void Verifier::visitGetFunctionParentScopeInst(
+    const GetFunctionParentScopeInst &Inst) {}
+void Verifier::visitCreateScopeInst(const CreateScopeInst &Inst) {}
+void Verifier::visitLoadVariableInst(const LoadVariableInst &Inst) {}
+void Verifier::visitStoreVariableInst(const StoreVariableInst &Inst) {}
+void Verifier::visitDeclareGlobalVarInst(const DeclareGlobalVarInst &Inst) {}
 
 } // namespace
 

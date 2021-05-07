@@ -25,6 +25,8 @@
 #include "llvh/Support/ConvertUTF.h"
 #include "llvh/Support/raw_ostream.h"
 
+#define DEBUG_TYPE "eval"
+
 namespace hermes {
 namespace vm {
 
@@ -35,6 +37,7 @@ CallResult<HermesValue> evalInEnvironment(
     const ScopeChain &scopeChain,
     Handle<> thisArg,
     bool singleFunction) {
+  LLVM_DEBUG(llvh::dbgs() << "EVAL:" << utf8code << "\n");
 #ifdef HERMESVM_LEAN
   return runtime->raiseEvalUnsupported(utf8code);
 #else

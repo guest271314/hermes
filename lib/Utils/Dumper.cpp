@@ -102,6 +102,17 @@ void IRPrinter::printTypeLabel(Type T) {
 }
 
 void IRPrinter::printValueLabel(Instruction *I, Value *V, unsigned opIndex) {
+  auto printScopeName = [this, I](ScopeDesc *SD) {
+    if (!SD) {
+      os << "0";
+      return;
+    }
+    os << "%S" << ScopeNamer.getNumber(SD);
+    if (I->getParent()->getParent() != SD->getFunction()) {
+      os << "@" << quoteStr(SD->getFunction()->getInternalNameStr());
+    }
+  };
+
   auto &ctx = I->getContext();
   if (isa<CallBuiltinInst>(I) && opIndex == 0) {
     os << "["
@@ -159,6 +170,28 @@ void IRPrinter::printValueLabel(Instruction *I, Value *V, unsigned opIndex) {
       os << "@" << quoteStr(scopeName);
     }
     os << "]";
+  } else if (auto *SD = dyn_cast<ScopeDesc>(V)) {
+    printScopeName(SD);
+    // In some special instructions, dump the contents of the scope.
+    if (isa<CreateScopeInst>(I)) {
+      os << "{p:";
+      printScopeName(SD->getParent());
+      if (!SD->getVariables().empty()) {
+        os << ", v:[";
+        unsigned i = 0;
+        for (auto *var : SD->getVariables()) {
+          if (i++)
+            os << ", ";
+          os << quoteStr(ctx.toString(var->getName()));
+        }
+        os << ']';
+      }
+      os << '}';
+    }
+  } else if (auto SV = dyn_cast<ScopeVar>(V)) {
+    os << "[" << quoteStr(ctx.toString(SV->getName()));
+    printScopeName(SV->getScope());
+    os << "]";
   } else {
     llvm_unreachable("Invalid value");
   }
@@ -183,38 +216,6 @@ void IRPrinter::printFunctionHeader(Function *F) {
   }
   os << ")";
   printTypeLabel(F->getType());
-}
-
-void IRPrinter::printFunctionVariables(Function *F) {
-  bool first = true;
-  auto &Ctx = F->getContext();
-  os << "frame = [";
-  for (auto V : F->getFunctionScope()->getVariables()) {
-    if (!first) {
-      os << ", ";
-    }
-    os << Ctx.toString(V->getName());
-    printTypeLabel(V->getType());
-    first = false;
-  }
-  os << "]";
-
-  if (F->isGlobalScope()) {
-    bool first2 = true;
-    for (auto *GP : F->getParent()->getGlobalProperties()) {
-      if (!GP->isDeclared())
-        continue;
-      if (first2) {
-        os << ", globals = [";
-      } else {
-        os << ", ";
-      }
-      os << Ctx.toString(GP->getName()->getValue());
-      first2 = false;
-    }
-    if (!first2)
-      os << "]";
-  }
 }
 
 void IRPrinter::printInstructionDestination(Instruction *I) {
@@ -293,14 +294,17 @@ void IRPrinter::visitFunction(const Function &F) {
   os.indent(Indent);
   BBNamer.clear();
   InstNamer.clear();
+
+  // Number all scopes in creation order before they are visited.
+  for (auto *SD : UF->getScopes())
+    ScopeNamer.getNumber(SD);
+
   // Number all instructions sequentially.
   for (auto &BB : *UF)
     for (auto &I : BB)
       InstNamer.getNumber(&I);
 
   printFunctionHeader(UF);
-  os << "\n";
-  printFunctionVariables(UF);
   os << "\n";
 
   auto codeGenOpts = F.getContext().getCodeGenerationSettings();

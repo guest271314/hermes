@@ -21,6 +21,7 @@
 
 using llvh::ArrayRef;
 using llvh::cast;
+using llvh::isa;
 
 namespace hermes {
 
@@ -527,15 +528,28 @@ class CreateFunctionInst : public Instruction {
   void operator=(const CreateFunctionInst &) = delete;
 
  public:
-  enum { FunctionCodeIdx, LAST_IDX };
+  enum { FunctionCodeIdx, EnclosingScopeIdx, EnclosingDescIdx };
 
-  explicit CreateFunctionInst(ValueKind kind, Function *code)
+  explicit CreateFunctionInst(
+      ValueKind kind,
+      Function *code,
+      Value *enclosingScope,
+      ScopeDesc *enclosingDesc)
       : Instruction(kind) {
     setType(Type::createClosure());
     pushOperand(code);
+    pushOperand(enclosingScope);
+    pushOperand(enclosingDesc);
   }
-  explicit CreateFunctionInst(Function *code)
-      : CreateFunctionInst(ValueKind::CreateFunctionInstKind, code) {}
+  explicit CreateFunctionInst(
+      Function *code,
+      Value *enclosingScope,
+      ScopeDesc *enclosingDesc)
+      : CreateFunctionInst(
+            ValueKind::CreateFunctionInstKind,
+            code,
+            enclosingScope,
+            enclosingDesc) {}
   explicit CreateFunctionInst(
       const CreateFunctionInst *src,
       llvh::ArrayRef<Value *> operands)
@@ -543,6 +557,12 @@ class CreateFunctionInst : public Instruction {
 
   Function *getFunctionCode() const {
     return cast<Function>(getOperand(FunctionCodeIdx));
+  }
+  Value *getEnclosingScope() const {
+    return getOperand(EnclosingScopeIdx);
+  }
+  ScopeDesc *getEnclosingDesc() const {
+    return cast<ScopeDesc>(getOperand(EnclosingDescIdx));
   }
 
   SideEffectKind getSideEffect() {
@@ -1956,6 +1976,260 @@ class TryEndInst : public Instruction {
   }
 };
 
+class GetFunctionParentScopeInst : public Instruction {
+  GetFunctionParentScopeInst(const GetFunctionParentScopeInst &) = delete;
+  void operator=(const GetFunctionParentScopeInst &) = delete;
+
+ public:
+  enum { ScopeDescIdx };
+
+  explicit GetFunctionParentScopeInst(ScopeDesc *scopeDesc)
+      : Instruction(ValueKind::GetFunctionParentScopeInstKind) {
+    pushOperand(scopeDesc);
+    setType(Type::createObject());
+  }
+  explicit GetFunctionParentScopeInst(
+      const GetFunctionParentScopeInst *src,
+      llvh::ArrayRef<Value *> operands)
+      : Instruction(src, operands) {}
+
+  ScopeDesc *getScopeDesc() const {
+    return cast<ScopeDesc>(getOperand(ScopeDescIdx));
+  }
+
+  SideEffectKind getSideEffect() {
+    return SideEffectKind::None;
+  }
+
+  WordBitSet<> getChangedOperandsImpl() {
+    return {};
+  }
+
+  static bool classof(const Value *V) {
+    return kindIsA(V->getKind(), ValueKind::GetFunctionParentScopeInstKind);
+  }
+};
+
+class CreateScopeInst : public Instruction {
+  CreateScopeInst(const CreateScopeInst &) = delete;
+  void operator=(const CreateScopeInst &) = delete;
+
+ public:
+  enum { ParentScopeIdx, ScopeDescIdx };
+
+  explicit CreateScopeInst(Value *parentScope, ScopeDesc *scopeDesc)
+      : Instruction(ValueKind::CreateScopeInstKind) {
+    pushOperand(parentScope);
+    pushOperand(scopeDesc);
+    setType(Type::createObject());
+  }
+  explicit CreateScopeInst(
+      const CreateScopeInst *src,
+      llvh::ArrayRef<Value *> operands)
+      : Instruction(src, operands) {}
+
+  Value *getParentScope() const {
+    return getOperand(ParentScopeIdx);
+  }
+  ScopeDesc *getScopeDesc() const {
+    return cast<ScopeDesc>(getOperand(ScopeDescIdx));
+  }
+
+  SideEffectKind getSideEffect() {
+    return SideEffectKind::None;
+  }
+
+  WordBitSet<> getChangedOperandsImpl() {
+    return {};
+  }
+
+  static bool classof(const Value *V) {
+    return kindIsA(V->getKind(), ValueKind::CreateScopeInstKind);
+  }
+};
+
+class GetParentScopeInst : public Instruction {
+  GetParentScopeInst(const GetParentScopeInst &) = delete;
+  void operator=(const GetParentScopeInst &) = delete;
+
+ public:
+  enum { StartScopeIdx, StartScopeDescIdx, DesiredScopeDescIdx };
+
+  explicit GetParentScopeInst(
+      Value *startScope,
+      ScopeDesc *startScopeDesc,
+      ScopeDesc *desiredScopeDesc)
+      : Instruction(ValueKind::GetParentScopeInstKind) {
+    pushOperand(startScope);
+    pushOperand(startScopeDesc);
+    pushOperand(desiredScopeDesc);
+    setType(Type::createObject());
+  }
+  explicit GetParentScopeInst(
+      const GetParentScopeInst *src,
+      llvh::ArrayRef<Value *> operands)
+      : Instruction(src, operands) {}
+
+  Value *getStartScope() const {
+    return getOperand(StartScopeIdx);
+  }
+  ScopeDesc *getStartScopeDesc() const {
+    return cast<ScopeDesc>(getOperand(StartScopeDescIdx));
+  }
+  ScopeDesc *getDesiredScopeDesc() const {
+    return cast<ScopeDesc>(getOperand(DesiredScopeDescIdx));
+  }
+
+  SideEffectKind getSideEffect() {
+    return SideEffectKind::None;
+  }
+
+  WordBitSet<> getChangedOperandsImpl() {
+    return {};
+  }
+
+  static bool classof(const Value *V) {
+    return kindIsA(V->getKind(), ValueKind::GetParentScopeInstKind);
+  }
+};
+
+class LoadVariableInst : public Instruction {
+  LoadVariableInst(const LoadVariableInst &) = delete;
+  void operator=(const LoadVariableInst &) = delete;
+
+ public:
+  enum { VarIdx, StartScopeIdx, StartScopeDescIdx };
+
+  explicit LoadVariableInst(
+      ScopeVar *var,
+      Value *startScope,
+      ScopeDesc *startScopeDesc)
+      : Instruction(ValueKind::LoadVariableInstKind) {
+    pushOperand(var);
+    pushOperand(startScope);
+    pushOperand(startScopeDesc);
+  }
+  explicit LoadVariableInst(
+      const LoadVariableInst *src,
+      llvh::ArrayRef<Value *> operands)
+      : Instruction(src, operands) {}
+
+  ScopeVar *getVar() const {
+    return cast<ScopeVar>(getOperand(VarIdx));
+  }
+  Value *getStartScope() const {
+    return getOperand(StartScopeIdx);
+  }
+  ScopeDesc *getStartScopeDesc() const {
+    return cast<ScopeDesc>(getOperand(StartScopeDescIdx));
+  }
+
+  void updateStartScope(Value *startScope, ScopeDesc *startScopeDesc) {
+    setOperand(startScope, StartScopeIdx);
+    setOperand(startScopeDesc, StartScopeDescIdx);
+  }
+
+  SideEffectKind getSideEffect() {
+    return SideEffectKind::None;
+  }
+
+  WordBitSet<> getChangedOperandsImpl() {
+    return {};
+  }
+
+  static bool classof(const Value *V) {
+    return kindIsA(V->getKind(), ValueKind::LoadVariableInstKind);
+  }
+};
+
+class StoreVariableInst : public Instruction {
+  StoreVariableInst(const StoreVariableInst &) = delete;
+  void operator=(const StoreVariableInst &) = delete;
+
+ public:
+  enum { ValueIdx, TargetVarIdx, StartScopeIdx, StartScopeDescIdx };
+
+  explicit StoreVariableInst(
+      Value *value,
+      ScopeVar *targetVar,
+      Value *startScope,
+      ScopeDesc *startScopeDesc)
+      : Instruction(ValueKind::StoreVariableInstKind) {
+    setType(Type::createNoType());
+    pushOperand(value);
+    pushOperand(targetVar);
+    pushOperand(startScope);
+    pushOperand(startScopeDesc);
+  }
+  explicit StoreVariableInst(
+      const StoreVariableInst *src,
+      llvh::ArrayRef<Value *> operands)
+      : Instruction(src, operands) {}
+
+  Value *getValue() const {
+    return getOperand(ValueIdx);
+  }
+  ScopeVar *getTargetVar() const {
+    return cast<ScopeVar>(getOperand(TargetVarIdx));
+  }
+  Value *getStartScope() const {
+    return getOperand(StartScopeIdx);
+  }
+  ScopeDesc *getStartScopeDesc() const {
+    return cast<ScopeDesc>(getOperand(StartScopeDescIdx));
+  }
+
+  void updateStartScope(Value *startScope, ScopeDesc *startScopeDesc) {
+    setOperand(startScope, StartScopeIdx);
+    setOperand(startScopeDesc, StartScopeDescIdx);
+  }
+
+  SideEffectKind getSideEffect() {
+    return SideEffectKind::MayWrite;
+  }
+
+  WordBitSet<> getChangedOperandsImpl() {
+    return {};
+  }
+
+  static bool classof(const Value *V) {
+    return kindIsA(V->getKind(), ValueKind::StoreVariableInstKind);
+  }
+};
+
+class DeclareGlobalVarInst : public Instruction {
+  DeclareGlobalVarInst(const DeclareGlobalVarInst &) = delete;
+  void operator=(const DeclareGlobalVarInst &) = delete;
+
+ public:
+  enum { NameIdx };
+
+  explicit DeclareGlobalVarInst(LiteralString *name)
+      : Instruction(ValueKind::DeclareGlobalVarInstKind) {
+    pushOperand(name);
+  }
+  explicit DeclareGlobalVarInst(
+      const DeclareGlobalVarInst *src,
+      llvh::ArrayRef<Value *> operands)
+      : Instruction(src, operands) {}
+
+  LiteralString *getName() const {
+    return cast<LiteralString>(getOperand(NameIdx));
+  }
+
+  SideEffectKind getSideEffect() {
+    return SideEffectKind::Unknown;
+  }
+
+  WordBitSet<> getChangedOperandsImpl() {
+    return {};
+  }
+
+  static bool classof(const Value *V) {
+    return kindIsA(V->getKind(), ValueKind::DeclareGlobalVarInstKind);
+  }
+};
+
 class PhiInst : public Instruction {
   PhiInst(const PhiInst &) = delete;
   void operator=(const PhiInst &) = delete;
@@ -2169,113 +2443,6 @@ class ThrowIfEmptyInst : public Instruction {
   }
 };
 
-class HBCResolveEnvironment : public SingleOperandInst {
-  HBCResolveEnvironment(const HBCResolveEnvironment &) = delete;
-  void operator=(const HBCResolveEnvironment &) = delete;
-
- public:
-  explicit HBCResolveEnvironment(VariableScope *scope)
-      : SingleOperandInst(ValueKind::HBCResolveEnvironmentKind, scope) {}
-  explicit HBCResolveEnvironment(
-      const HBCResolveEnvironment *src,
-      llvh::ArrayRef<Value *> operands)
-      : SingleOperandInst(src, operands) {}
-
-  VariableScope *getScope() const {
-    return cast<VariableScope>(getSingleOperand());
-  }
-
-  SideEffectKind getSideEffect() {
-    return SideEffectKind::None;
-  }
-
-  WordBitSet<> getChangedOperandsImpl() {
-    return {};
-  }
-
-  static bool classof(const Value *V) {
-    return kindIsA(V->getKind(), ValueKind::HBCResolveEnvironmentKind);
-  }
-};
-
-class HBCStoreToEnvironmentInst : public Instruction {
-  HBCStoreToEnvironmentInst(const HBCStoreToEnvironmentInst &) = delete;
-  void operator=(const HBCStoreToEnvironmentInst &) = delete;
-
- public:
-  enum { EnvIdx, ValueIdx, NameIdx };
-
-  explicit HBCStoreToEnvironmentInst(Value *env, Value *toPut, Variable *var)
-      : Instruction(ValueKind::HBCStoreToEnvironmentInstKind) {
-    pushOperand(env);
-    pushOperand(toPut);
-    pushOperand(var);
-  }
-  explicit HBCStoreToEnvironmentInst(
-      const HBCStoreToEnvironmentInst *src,
-      llvh::ArrayRef<Value *> operands)
-      : Instruction(src, operands) {}
-
-  Variable *getResolvedName() const {
-    return cast<Variable>(getOperand(NameIdx));
-  }
-  Value *getEnvironment() const {
-    return getOperand(EnvIdx);
-  }
-  Value *getStoredValue() const {
-    return getOperand(ValueIdx);
-  }
-
-  SideEffectKind getSideEffect() {
-    return SideEffectKind::MayWrite;
-  }
-
-  WordBitSet<> getChangedOperandsImpl() {
-    return {};
-  }
-
-  static bool classof(const Value *V) {
-    return kindIsA(V->getKind(), ValueKind::HBCStoreToEnvironmentInstKind);
-  }
-};
-
-class HBCLoadFromEnvironmentInst : public Instruction {
-  HBCLoadFromEnvironmentInst(const HBCLoadFromEnvironmentInst &) = delete;
-  void operator=(const HBCLoadFromEnvironmentInst &) = delete;
-
- public:
-  enum { EnvIdx, NameIdx };
-
-  explicit HBCLoadFromEnvironmentInst(Value *env, Variable *var)
-      : Instruction(ValueKind::HBCLoadFromEnvironmentInstKind) {
-    pushOperand(env);
-    pushOperand(var);
-  }
-  explicit HBCLoadFromEnvironmentInst(
-      const HBCLoadFromEnvironmentInst *src,
-      llvh::ArrayRef<Value *> operands)
-      : Instruction(src, operands) {}
-
-  Variable *getResolvedName() const {
-    return cast<Variable>(getOperand(NameIdx));
-  }
-  Value *getEnvironment() const {
-    return getOperand(EnvIdx);
-  }
-
-  SideEffectKind getSideEffect() {
-    return SideEffectKind::MayRead;
-  }
-
-  WordBitSet<> getChangedOperandsImpl() {
-    return {};
-  }
-
-  static bool classof(const Value *V) {
-    return kindIsA(V->getKind(), ValueKind::HBCLoadFromEnvironmentInstKind);
-  }
-};
-
 class SwitchImmInst : public TerminatorInst {
   SwitchImmInst(const SwitchImmInst &) = delete;
   void operator=(const SwitchImmInst &) = delete;
@@ -2427,31 +2594,6 @@ class DirectEvalInst : public SingleOperandInst {
 
   static bool classof(const Value *V) {
     return kindIsA(V->getKind(), ValueKind::DirectEvalInstKind);
-  }
-};
-
-class HBCCreateEnvironmentInst : public Instruction {
-  HBCCreateEnvironmentInst(const HBCCreateEnvironmentInst &) = delete;
-  void operator=(const HBCCreateEnvironmentInst &) = delete;
-
- public:
-  explicit HBCCreateEnvironmentInst()
-      : Instruction(ValueKind::HBCCreateEnvironmentInstKind) {}
-  explicit HBCCreateEnvironmentInst(
-      const HBCCreateEnvironmentInst *src,
-      llvh::ArrayRef<Value *> operands)
-      : Instruction(src, operands) {}
-
-  SideEffectKind getSideEffect() {
-    return SideEffectKind::None;
-  }
-
-  WordBitSet<> getChangedOperandsImpl() {
-    return {};
-  }
-
-  static bool classof(const Value *V) {
-    return kindIsA(V->getKind(), ValueKind::HBCCreateEnvironmentInstKind);
   }
 };
 
@@ -2809,32 +2951,6 @@ class HBCCallDirectInst : public CallInst {
   }
 };
 
-/// Creating a closure in HBC requires an explicit environment.
-class HBCCreateFunctionInst : public CreateFunctionInst {
-  HBCCreateFunctionInst(const HBCCreateFunctionInst &) = delete;
-  void operator=(const HBCCreateFunctionInst &) = delete;
-
- public:
-  enum { EnvIdx = CreateFunctionInst::LAST_IDX };
-
-  explicit HBCCreateFunctionInst(Function *code, Value *env)
-      : CreateFunctionInst(ValueKind::HBCCreateFunctionInstKind, code) {
-    pushOperand(env);
-  }
-  explicit HBCCreateFunctionInst(
-      const HBCCreateFunctionInst *src,
-      llvh::ArrayRef<Value *> operands)
-      : CreateFunctionInst(src, operands) {}
-
-  Value *getEnvironment() const {
-    return getOperand(EnvIdx);
-  }
-
-  static bool classof(const Value *V) {
-    return kindIsA(V->getKind(), ValueKind::HBCCreateFunctionInstKind);
-  }
-};
-
 /// Identical to a Mov, except it should never be eliminated.
 /// Elimination will undo spilling and cause failures during bc gen.
 class HBCSpillMovInst : public SingleOperandInst {
@@ -2950,12 +3066,17 @@ class CreateGeneratorInst : public CreateFunctionInst {
   void operator=(const CreateGeneratorInst &) = delete;
 
  public:
-  explicit CreateGeneratorInst(ValueKind kind, Function *genFunction)
-      : CreateFunctionInst(kind, genFunction) {
+  explicit CreateGeneratorInst(
+      Function *code,
+      Value *enclosingScope,
+      ScopeDesc *enclosingDesc)
+      : CreateFunctionInst(
+            ValueKind::CreateGeneratorInstKind,
+            code,
+            enclosingScope,
+            enclosingDesc) {
     setType(Type::createObject());
   }
-  explicit CreateGeneratorInst(Function *genFunction)
-      : CreateGeneratorInst(ValueKind::CreateGeneratorInstKind, genFunction) {}
   explicit CreateGeneratorInst(
       const CreateGeneratorInst *src,
       llvh::ArrayRef<Value *> operands)
@@ -2963,32 +3084,6 @@ class CreateGeneratorInst : public CreateFunctionInst {
 
   static bool classof(const Value *V) {
     return kindIsA(V->getKind(), ValueKind::CreateGeneratorInstKind);
-  }
-};
-
-/// Creating a closure in HBC requires an explicit environment.
-class HBCCreateGeneratorInst : public CreateGeneratorInst {
-  HBCCreateGeneratorInst(const HBCCreateGeneratorInst &) = delete;
-  void operator=(const HBCCreateGeneratorInst &) = delete;
-
- public:
-  enum { EnvIdx = CreateGeneratorInst::LAST_IDX };
-
-  explicit HBCCreateGeneratorInst(Function *code, Value *env)
-      : CreateGeneratorInst(ValueKind::HBCCreateGeneratorInstKind, code) {
-    pushOperand(env);
-  }
-  explicit HBCCreateGeneratorInst(
-      const HBCCreateGeneratorInst *src,
-      llvh::ArrayRef<Value *> operands)
-      : CreateGeneratorInst(src, operands) {}
-
-  Value *getEnvironment() const {
-    return getOperand(EnvIdx);
-  }
-
-  static bool classof(const Value *V) {
-    return kindIsA(V->getKind(), ValueKind::HBCCreateGeneratorInstKind);
   }
 };
 

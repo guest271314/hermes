@@ -148,6 +148,35 @@ bool Value::hasUser(Value *other) {
   return std::find(Users.begin(), Users.end(), other) != Users.end();
 }
 
+//===----------------------------------------------------------------------===//
+// class ScopeDesc
+
+ScopeDesc::ScopeDesc(Function *function, ScopeDesc *parent)
+    : Value(ValueKind::ScopeDescKind), function_(function), parent_(parent) {}
+
+ScopeDesc::~ScopeDesc() {
+  // Free all variables.
+  for (auto *v : variables_)
+    Value::destroy(v);
+}
+
+ScopeVar *ScopeDesc::createVariable(
+    ScopeVar::DeclKind declKind,
+    Identifier name) {
+  auto *var = new ScopeVar(this, declKind, name);
+  variables_.push_back(var);
+  return var;
+}
+
+unsigned ScopeDesc::findIndexInVariableList(const ScopeVar *var) const {
+  auto it = std::find(variables_.begin(), variables_.end(), var);
+  assert(it != variables_.end() && "cannot find variable in scope");
+  return it - variables_.begin();
+}
+
+//===----------------------------------------------------------------------===//
+//
+
 bool VariableScope::isGlobalScope() const {
   return function_->isGlobalScope() && function_->getFunctionScope() == this;
 }
@@ -156,6 +185,9 @@ ExternalScope::ExternalScope(Function *function, int32_t depth)
     : VariableScope(ValueKind::ExternalScopeKind, function), depth_(depth) {
   function->addExternalScope(this);
 }
+
+//===----------------------------------------------------------------------===//
+// class Function
 
 Function::Function(
     ValueKind kind,
@@ -200,6 +232,10 @@ Function::~Function() {
   // Free all external scopes.
   for (auto *ES : externalScopes_)
     Value::destroy(ES);
+
+  // Destroy all scopes.
+  for (auto *scope : scopes_)
+    Value::destroy(scope);
 }
 
 std::string Function::getDefinitionKindStr(bool isDescriptive) const {
@@ -485,6 +521,14 @@ Context &Function::getContext() const {
   return parent_->getContext();
 }
 
+ScopeDesc *Function::createScopeDesc(ScopeDesc *parentScope) {
+  auto *scope = new ScopeDesc(this, parentScope);
+  scopes_.push_back(scope);
+  if (parentScope)
+    parentScope->addChild(scope);
+  return scope;
+}
+
 void Function::addBlock(BasicBlock *BB) {
   BasicBlockList.push_back(BB);
 }
@@ -706,9 +750,8 @@ void Module::viewGraph() {
 }
 
 void Module::dump() {
-  for (auto &F : *this) {
-    F.dump();
-  }
+  IRPrinter D(getContext(), llvh::outs());
+  D.visit(*this);
 }
 
 LiteralNumber *Module::getLiteralNumber(double value) {

@@ -230,7 +230,8 @@ bool hermes::isSimpleSideEffectFreeInstruction(Instruction *I) {
     case ValueKind::GetNewTargetInstKind:
     case ValueKind::UnaryOperatorInstKind:
     case ValueKind::BinaryOperatorInstKind:
-    case ValueKind::HBCResolveEnvironmentKind:
+    case ValueKind::GetParentScopeInstKind:
+    case ValueKind::GetFunctionParentScopeInstKind:
     case ValueKind::HBCLoadConstInstKind:
     case ValueKind::HBCGetGlobalObjectInstKind:
       return true;

@@ -1123,9 +1123,7 @@ void BytecodeDisassembler::disassemble(raw_ostream &OS) {
       OS << funcId;
     }
     OS << "(" << functionHeader.paramCount() << " params, "
-       << functionHeader.frameSize() << " registers, "
-       << static_cast<unsigned int>(functionHeader.environmentSize())
-       << " symbols)";
+       << functionHeader.frameSize() << " registers)";
     OS << ":\n";
 
     auto *funcDebugOffsets = bcProvider_->getDebugOffsets(funcId);
