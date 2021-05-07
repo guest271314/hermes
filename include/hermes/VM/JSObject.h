@@ -1252,6 +1252,14 @@ class JSObject : public GCCell {
       const IndexedCB &indexedCB,
       const NamedCB &namedCB);
 
+  /// Look for a property and return a \c PropertyPos identifying it and store
+  /// its descriptor in \p desc.
+  static OptValue<HiddenClass::PropertyPos> findProperty(
+      Handle<JSObject> selfHandle,
+      Runtime *runtime,
+      SymbolID name,
+      NamedPropertyDescriptor &desc);
+
   /// Return the type name of this object, if it can be found heuristically.
   /// There is no one definitive type name for an object. If no heuristic is
   /// able to produce a name, the empty string is returned.
@@ -1373,14 +1381,6 @@ class JSObject : public GCCell {
       Runtime *runtime,
       SymbolID name,
       PropertyFlags expectedFlags,
-      NamedPropertyDescriptor &desc);
-
-  /// Look for a property and return a \c PropertyPos identifying it and store
-  /// its descriptor in \p desc.
-  static OptValue<HiddenClass::PropertyPos> findProperty(
-      Handle<JSObject> selfHandle,
-      Runtime *runtime,
-      SymbolID name,
       NamedPropertyDescriptor &desc);
 
   /// ES5.1 8.12.9.
