@@ -25,9 +25,8 @@ class Environment final
   friend TrailingObjects;
   friend void EnvironmentBuildMeta(const GCCell *cell, Metadata::Builder &mb);
 
-  /// The parent lexical environment. This value will be nullptr if the
-  /// parent is the global scope.
-  GCPointer<Environment> parentEnvironment_{};
+  /// The parent lexical environment.
+  GCPointer<GCCell> parentEnvironment_{};
 
   /// Number of entries in the environment.
   AtomicIfConcurrentGC<uint32_t> size_;
@@ -45,10 +44,8 @@ class Environment final
   }
 
   /// Create a new Environment.
-  static CallResult<HermesValue> create(
-      Runtime *runtime,
-      Handle<Environment> parentEnvironment,
-      uint32_t size) {
+  static CallResult<HermesValue>
+  create(Runtime *runtime, Handle<GCCell> parentEnvironment, uint32_t size) {
     auto *cell = runtime->makeAVariable<Environment>(
         allocationSize(size), runtime, parentEnvironment, size);
     return HermesValue::encodeObjectValue(cell);
@@ -56,7 +53,7 @@ class Environment final
 
   /// \return the parent lexical environment. This value will be nullptr if the
   /// parent is the global scope.
-  Environment *getParentEnvironment(Runtime *runtime) const {
+  GCCell *getParentEnvironment(Runtime *runtime) const {
     return parentEnvironment_.get(runtime);
   }
 
@@ -79,10 +76,7 @@ class Environment final
   /// \param parentEnvironment the parent lexical environment, or nullptr if the
   ///   parent is the global scope.
   /// \param size the number of entries in the environment.
-  Environment(
-      Runtime *runtime,
-      Handle<Environment> parentEnvironment,
-      uint32_t size)
+  Environment(Runtime *runtime, Handle<GCCell> parentEnvironment, uint32_t size)
       : VariableSizeRuntimeCell(&runtime->getHeap(), &vt, allocationSize(size)),
         parentEnvironment_(
             runtime,
@@ -140,7 +134,7 @@ class Callable : public JSObject {
   friend void CallableBuildMeta(const GCCell *cell, Metadata::Builder &mb);
 
   /// Environment containing all captured variables for the function.
-  GCPointer<Environment> environment_{};
+  GCPointer<GCCell> environment_{};
 
  public:
 #ifdef HERMESVM_SERIALIZE
@@ -165,7 +159,7 @@ class Callable : public JSObject {
   }
 
   /// \return the environment associated with this callable.
-  Environment *getEnvironment(Runtime *runtime) const {
+  GCCell *getEnvironment(Runtime *runtime) const {
     return environment_.get(runtime);
   }
 
@@ -333,7 +327,7 @@ class Callable : public JSObject {
       const VTable *vt,
       JSObject *parent,
       HiddenClass *clazz,
-      Handle<Environment> env)
+      Handle<GCCell> env)
       : JSObject(runtime, vt, parent, clazz),
         environment_(runtime, *env, &runtime->getHeap()) {}
   Callable(
@@ -952,7 +946,7 @@ class JSFunction : public Callable {
       Handle<Domain> domain,
       Handle<JSObject> parent,
       Handle<HiddenClass> clazz,
-      Handle<Environment> environment,
+      Handle<GCCell> environment,
       CodeBlock *codeBlock)
       : Callable(runtime, vtp, *parent, *clazz, environment),
         codeBlock_(codeBlock),
@@ -967,7 +961,7 @@ class JSFunction : public Callable {
       Handle<Domain> domain,
       Handle<JSObject> parent,
       Handle<HiddenClass> clazz,
-      Handle<Environment> environment,
+      Handle<GCCell> environment,
       CodeBlock *codeBlock)
       : JSFunction(
             runtime,
@@ -993,7 +987,7 @@ class JSFunction : public Callable {
       Runtime *runtime,
       Handle<Domain> domain,
       Handle<JSObject> parentHandle,
-      Handle<Environment> envHandle,
+      Handle<GCCell> envHandle,
       CodeBlock *codeBlock);
 
   /// Create a Function with no environment and a CodeBlock simply returning
@@ -1061,7 +1055,7 @@ class JSAsyncFunction final : public JSFunction {
       Runtime *runtime,
       Handle<Domain> domain,
       Handle<JSObject> parentHandle,
-      Handle<Environment> envHandle,
+      Handle<GCCell> envHandle,
       CodeBlock *codeBlock);
 
   /// Create a AsyncFunction with no environment and a CodeBlock simply
@@ -1074,7 +1068,7 @@ class JSAsyncFunction final : public JSFunction {
         runtime,
         runtime->makeHandle(Domain::create(runtime)),
         parentHandle,
-        runtime->makeNullHandle<Environment>(),
+        runtime->makeNullHandle<GCCell>(),
         runtime->getEmptyCodeBlock());
   }
 
@@ -1094,7 +1088,7 @@ class JSAsyncFunction final : public JSFunction {
       Handle<Domain> domain,
       Handle<JSObject> parent,
       Handle<HiddenClass> clazz,
-      Handle<Environment> environment,
+      Handle<GCCell> environment,
       CodeBlock *codeBlock)
       : Super(runtime, vtp, domain, parent, clazz, environment, codeBlock) {
     assert(
@@ -1107,9 +1101,9 @@ class JSAsyncFunction final : public JSFunction {
       Handle<Domain> domain,
       Handle<JSObject> parent,
       Handle<HiddenClass> clazz,
-      Handle<Environment> environment,
+      Handle<GCCell> environment,
       CodeBlock *codeBlock)
-      : JSFunction(
+      : Super(
             runtime,
             &vt.base.base,
             domain,
@@ -1135,7 +1129,7 @@ class JSGeneratorFunction final : public JSFunction {
       Runtime *runtime,
       Handle<Domain> domain,
       Handle<JSObject> parentHandle,
-      Handle<Environment> envHandle,
+      Handle<GCCell> envHandle,
       CodeBlock *codeBlock);
 
   /// Create a GeneratorFunction with no environment and a CodeBlock simply
@@ -1169,7 +1163,7 @@ class JSGeneratorFunction final : public JSFunction {
       Handle<Domain> domain,
       Handle<JSObject> parent,
       Handle<HiddenClass> clazz,
-      Handle<Environment> environment,
+      Handle<GCCell> environment,
       CodeBlock *codeBlock)
       : Super(runtime, vtp, domain, parent, clazz, environment, codeBlock) {
     assert(
@@ -1182,7 +1176,7 @@ class JSGeneratorFunction final : public JSFunction {
       Handle<Domain> domain,
       Handle<JSObject> parent,
       Handle<HiddenClass> clazz,
-      Handle<Environment> environment,
+      Handle<GCCell> environment,
       CodeBlock *codeBlock)
       : JSFunction(
             runtime,
@@ -1247,7 +1241,7 @@ class GeneratorInnerFunction final : public JSFunction {
       Runtime *runtime,
       Handle<Domain> domain,
       Handle<JSObject> parentHandle,
-      Handle<Environment> envHandle,
+      Handle<GCCell> envHandle,
       CodeBlock *codeBlock,
       NativeArgs args);
 
@@ -1340,7 +1334,7 @@ class GeneratorInnerFunction final : public JSFunction {
       Handle<Domain> domain,
       Handle<JSObject> parent,
       Handle<HiddenClass> clazz,
-      Handle<Environment> environment,
+      Handle<GCCell> environment,
       CodeBlock *codeBlock,
       uint32_t argCount)
       : JSFunction(

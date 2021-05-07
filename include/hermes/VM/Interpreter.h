@@ -20,13 +20,21 @@ namespace vm {
 /// Runtime.
 class Interpreter {
  public:
+  /// Allocate a GeneratorFunction for the specified function and the specified
+  /// environment. \param funcIndex function index in the global function table.
+  static CallResult<PseudoHandle<JSGeneratorFunction>> createGeneratorClosure(
+      Runtime *runtime,
+      RuntimeModule *runtimeModule,
+      unsigned funcIndex,
+      Handle<GCCell> envHandle);
+
   /// Allocate a generator for the specified function and the specified
   /// environment. \param funcIndex function index in the global function table.
   static CallResult<PseudoHandle<JSGenerator>> createGenerator_RJS(
       Runtime *runtime,
       RuntimeModule *runtimeModule,
       unsigned funcIndex,
-      Handle<Environment> envHandle,
+      Handle<GCCell> envHandle,
       NativeArgs args);
 
   /// Suspend the generator function and yield to the caller.

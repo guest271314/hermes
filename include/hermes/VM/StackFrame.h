@@ -150,7 +150,7 @@ class StackFramePtrT {
   /// possible if we are early in the code block, or with optimized code. This
   /// is stored in the call frame so that the debugger can gain access to the
   /// Environment at arbitrary frames. Note this is managed by the GC.
-  inline Handle<Environment> getDebugEnvironmentHandle() const;
+  inline Handle<GCCell> getDebugEnvironmentHandle() const;
 
   /// \return the callee debug environment.
   /// The environment associated with the callee's stack frame, that is, the
@@ -160,7 +160,7 @@ class StackFramePtrT {
   /// possible if we are early in the code block, or with optimized code. This
   /// is stored in the call frame so that the debugger can gain access to the
   /// Environment at arbitrary frames. Note this is managed by the GC.
-  inline Environment *getDebugEnvironment() const;
+  inline GCCell *getDebugEnvironment() const;
 
   /// \return the number of JavaScript arguments passed to the callee excluding
   /// \c "this".

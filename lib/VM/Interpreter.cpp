@@ -138,11 +138,25 @@ static const WrapperFunc interpWrappers[] = {PROFILER_SYMBOLS(LIST_ITEM)};
     }                                                            \
   } while (0)
 
+CallResult<PseudoHandle<JSGeneratorFunction>>
+Interpreter::createGeneratorClosure(
+    Runtime *runtime,
+    RuntimeModule *runtimeModule,
+    unsigned funcIndex,
+    Handle<GCCell> envHandle) {
+  return JSGeneratorFunction::create(
+      runtime,
+      runtimeModule->getDomain(runtime),
+      Handle<JSObject>::vmcast(&runtime->generatorFunctionPrototype),
+      envHandle,
+      runtimeModule->getCodeBlockMayAllocate(funcIndex));
+}
+
 CallResult<PseudoHandle<JSGenerator>> Interpreter::createGenerator_RJS(
     Runtime *runtime,
     RuntimeModule *runtimeModule,
     unsigned funcIndex,
-    Handle<Environment> envHandle,
+    Handle<GCCell> envHandle,
     NativeArgs args) {
   auto gifRes = GeneratorInnerFunction::create(
       runtime,
@@ -1989,7 +2003,7 @@ tailCall:
                   runtime,
                   runtimeModule->getDomain(runtime),
                   Handle<JSObject>::vmcast(&runtime->functionPrototype),
-                  Handle<Environment>::vmcast(&O2REG(CreateClosure)),
+                  Handle<GCCell>::vmcast(&O2REG(CreateClosure)),
                   runtimeModule->getCodeBlockMayAllocate(idVal))
                   .getHermesValue());
       gcScope.flushToSmallCount(KEEP_HANDLES);
@@ -2015,7 +2029,7 @@ tailCall:
               runtime,
               runtimeModule->getDomain(runtime),
               Handle<JSObject>::vmcast(&runtime->asyncFunctionPrototype),
-              Handle<Environment>::vmcast(&O2REG(CreateAsyncClosure)),
+              Handle<GCCell>::vmcast(&O2REG(CreateAsyncClosure)),
               runtimeModule->getCodeBlockMayAllocate(idVal))
               .getHermesValue());
       gcScope.flushToSmallCount(KEEP_HANDLES);
@@ -2041,7 +2055,7 @@ tailCall:
               runtime,
               runtimeModule->getDomain(runtime),
               Handle<JSObject>::vmcast(&runtime->generatorFunctionPrototype),
-              Handle<Environment>::vmcast(&O2REG(CreateGeneratorClosure)),
+              Handle<GCCell>::vmcast(&O2REG(CreateGeneratorClosure)),
               runtimeModule->getCodeBlockMayAllocate(idVal))
               .getHermesValue());
       gcScope.flushToSmallCount(KEEP_HANDLES);
@@ -2056,7 +2070,7 @@ tailCall:
                 runtime,
                 curCodeBlock->getRuntimeModule(),
                 ip->iCreateGenerator.op3,
-                Handle<Environment>::vmcast(&O2REG(CreateGenerator)),
+                Handle<GCCell>::vmcast(&O2REG(CreateGenerator)),
                 FRAME.getNativeArgs()));
         if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION)) {
           goto exception;
@@ -2074,7 +2088,7 @@ tailCall:
                 runtime,
                 curCodeBlock->getRuntimeModule(),
                 ip->iCreateGeneratorLongIndex.op3,
-                Handle<Environment>::vmcast(&O2REG(CreateGeneratorLongIndex)),
+                Handle<GCCell>::vmcast(&O2REG(CreateGeneratorLongIndex)),
                 FRAME.getNativeArgs()));
         if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION)) {
           goto exception;
@@ -2087,10 +2101,10 @@ tailCall:
       }
 
       CASE(GetEnvironment) {
-        Environment *curEnv = vmcast<Environment>(O2REG(GetEnvironment));
+        GCCell *curEnv = vmcast<GCCell>(O2REG(GetEnvironment));
         for (unsigned level = ip->iGetEnvironment.op3; level; --level) {
           assert(curEnv && "invalid environment relative level");
-          curEnv = curEnv->getParentEnvironment(runtime);
+          curEnv = vmcast<Environment>(curEnv)->getParentEnvironment(runtime);
         }
         O1REG(GetEnvironment) = HermesValue::encodeObjectValue(curEnv);
         ip = NEXTINST(GetEnvironment);
@@ -2108,9 +2122,8 @@ tailCall:
             res = Environment::create(
                 runtime,
                 O2REG(CreateEnvironment).isObject()
-                    ? Handle<Environment>::vmcast(&O2REG(CreateEnvironment))
-                    : Handle<Environment>::vmcast_or_null(
-                          &runtime->nullPointer_),
+                    ? Handle<GCCell>::vmcast(&O2REG(CreateEnvironment))
+                    : Handle<GCCell>::vmcast_or_null(&runtime->nullPointer_),
                 ip->iCreateEnvironment.op3));
         if (res == ExecutionStatus::EXCEPTION) {
           goto exception;

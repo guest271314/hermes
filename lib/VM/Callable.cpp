@@ -1261,7 +1261,7 @@ PseudoHandle<JSFunction> JSFunction::create(
     Runtime *runtime,
     Handle<Domain> domain,
     Handle<JSObject> parentHandle,
-    Handle<Environment> envHandle,
+    Handle<GCCell> envHandle,
     CodeBlock *codeBlock) {
   auto *cell = runtime->makeAFixed<JSFunction, kHasFinalizer>(
       runtime,
@@ -1391,7 +1391,7 @@ PseudoHandle<JSAsyncFunction> JSAsyncFunction::create(
     Runtime *runtime,
     Handle<Domain> domain,
     Handle<JSObject> parentHandle,
-    Handle<Environment> envHandle,
+    Handle<GCCell> envHandle,
     CodeBlock *codeBlock) {
   auto *cell = runtime->makeAFixed<JSAsyncFunction, kHasFinalizer>(
       runtime,
@@ -1467,7 +1467,7 @@ PseudoHandle<JSGeneratorFunction> JSGeneratorFunction::create(
     Runtime *runtime,
     Handle<Domain> domain,
     Handle<JSObject> parentHandle,
-    Handle<Environment> envHandle,
+    Handle<GCCell> envHandle,
     CodeBlock *codeBlock) {
   auto *cell = runtime->makeAFixed<JSGeneratorFunction, kHasFinalizer>(
       runtime,
@@ -1572,7 +1572,7 @@ CallResult<Handle<GeneratorInnerFunction>> GeneratorInnerFunction::create(
     Runtime *runtime,
     Handle<Domain> domain,
     Handle<JSObject> parentHandle,
-    Handle<Environment> envHandle,
+    Handle<GCCell> envHandle,
     CodeBlock *codeBlock,
     NativeArgs args) {
   auto *cell = runtime->makeAFixed<GeneratorInnerFunction>(

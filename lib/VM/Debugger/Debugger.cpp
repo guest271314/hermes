@@ -951,9 +951,9 @@ HermesValue Debugger::getVariableInFrame(
   // Descend the environment chain to the desired depth, or stop at null.
   // We may get a null environment if it has not been created.
   MutableHandle<Environment> env(
-      runtime_, frameInfo->frame->getDebugEnvironment());
+      runtime_, vmcast<Environment>(frameInfo->frame->getDebugEnvironment()));
   for (uint32_t i = 0; env && i < scopeDepth; i++)
-    env = env->getParentEnvironment(runtime_);
+    env = vmcast<Environment>(env->getParentEnvironment(runtime_));
 
   // Now we can get the variable, or undefined if we have no environment.
   return env ? env->slot(variableIndex) : undefined;
@@ -1023,7 +1023,8 @@ HermesValue Debugger::evalInFrame(
   bool singleFunction = false;
 
   // Environment may be undefined if it has not been created yet.
-  Handle<Environment> env = frameInfo->frame->getDebugEnvironmentHandle();
+  auto env = Handle<Environment>::vmcast(
+      frameInfo->frame->getDebugEnvironmentHandle());
   if (!env) {
     // TODO: this comes about when we break in a function before its environment
     // has been created. What we would like to do here is synthesize an

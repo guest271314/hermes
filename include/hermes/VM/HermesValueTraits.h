@@ -28,6 +28,7 @@ struct IsGCObject : public std::false_type {};
   struct IsGCObject<name> : public std::true_type {}
 
 // White-list objects that can be managed by HermesValue.
+HERMES_VM_GCOBJECT(GCCell);
 HERMES_VM_GCOBJECT(StringPrimitive);
 HERMES_VM_GCOBJECT(JSObject);
 HERMES_VM_GCOBJECT(Callable);

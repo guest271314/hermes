@@ -47,18 +47,18 @@ inline Callable *StackFramePtrT<isConst>::getCalleeClosure() const {
 }
 
 template <bool isConst>
-inline Handle<Environment> StackFramePtrT<isConst>::getDebugEnvironmentHandle()
+inline Handle<GCCell> StackFramePtrT<isConst>::getDebugEnvironmentHandle()
     const {
   return getDebugEnvironmentRef().isUndefined()
-      ? HandleRootOwner::makeNullHandle<Environment>()
-      : Handle<Environment>::vmcast_or_null(&getDebugEnvironmentRef());
+      ? HandleRootOwner::makeNullHandle<GCCell>()
+      : Handle<GCCell>::vmcast_or_null(&getDebugEnvironmentRef());
 }
 
 template <bool isConst>
-inline Environment *StackFramePtrT<isConst>::getDebugEnvironment() const {
+inline GCCell *StackFramePtrT<isConst>::getDebugEnvironment() const {
   return getDebugEnvironmentRef().isUndefined()
       ? nullptr
-      : vmcast_or_null<Environment>(getDebugEnvironmentRef());
+      : vmcast_or_null<GCCell>(getDebugEnvironmentRef());
 }
 
 } // namespace vm
