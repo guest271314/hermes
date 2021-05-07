@@ -28,9 +28,13 @@ unsigned BytecodeFunctionGenerator::getStringID(LiteralString *value) const {
   return BMGen_.getStringID(value->getValue().str());
 }
 
+unsigned BytecodeFunctionGenerator::getIdentifierID(StringRef str) const {
+  return BMGen_.getIdentifierID(str);
+}
+
 unsigned BytecodeFunctionGenerator::getIdentifierID(
     LiteralString *value) const {
-  return BMGen_.getIdentifierID(value->getValue().str());
+  return getIdentifierID(value->getValue().str());
 }
 
 uint32_t BytecodeFunctionGenerator::addRegExp(CompiledRegExp regexp) {

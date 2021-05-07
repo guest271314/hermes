@@ -6,6 +6,7 @@
  */
 
 // RUN: %hermes -commonjs %S/cjs-throw-1.js %S/cjs-throw-2.js | %FileCheck --match-full-lines %s
+// RUN: %hermes -fobject-scoping -commonjs %S/cjs-throw-1.js %S/cjs-throw-2.js | %FileCheck --match-full-lines %s
 // RUN: %hermes -commonjs -fstatic-require -fstatic-builtins -O %S/cjs-throw-1.js %S/cjs-throw-2.js | %FileCheck --match-full-lines %s
 
 // cjs-throw-2 expects that x === 5, and throws otherwise.

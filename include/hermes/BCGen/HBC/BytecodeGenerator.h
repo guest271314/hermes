@@ -135,6 +135,10 @@ class BytecodeFunctionGenerator : public BytecodeInstructionGenerator {
 
   /// \return the ID in the bytecode's string table for a given literal string
   /// \p value, assuming it has been registered for us as an identifier.
+  unsigned getIdentifierID(StringRef str) const;
+
+  /// \return the ID in the bytecode's string table for a given literal string
+  /// \p value, assuming it has been registered for us as an identifier.
   unsigned getIdentifierID(LiteralString *value) const;
 
   /// Adds a compiled regexp to the module table.

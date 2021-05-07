@@ -6,6 +6,7 @@
  */
 
 // RUN: %hermes -O0 -commonjs %S/cjs-caching-1.js %S/cjs-caching-2.js %S/cjs-caching-3.js | %FileCheck --match-full-lines %s
+// RUN: %hermes -fobject-scoping -commonjs %S/cjs-caching-1.js %S/cjs-caching-2.js %S/cjs-caching-3.js | %FileCheck --match-full-lines %s
 // RUN: %hermes -O -fstatic-require -commonjs %S/cjs-caching-1.js %S/cjs-caching-2.js %S/cjs-caching-3.js | %FileCheck --match-full-lines %s
 // RUN: %hermes -O -commonjs %S/cjs-caching-1.js %S/cjs-caching-2.js %S/cjs-caching-3.js | %FileCheck --match-full-lines %s
 

@@ -279,6 +279,13 @@ static opt<bool> EagerCompilation(
     desc("Force fully eager compilation"),
     cat(CompilerCategory));
 
+static CLFlag ObjectScoping(
+    'f',
+    "object-scoping",
+    false,
+    "Use object scoping",
+    CompilerCategory);
+
 /// The following flags are exported so it may be used by the VM driver as well.
 opt<bool> BasicBlockProfiling(
     "basic-block-profiling",
@@ -395,6 +402,12 @@ static opt<LocationDumpMode> DumpSourceLocation(
             "Print both source location and byte range"),
         clEnumValN(LocationDumpMode::Loc, "loc", "Print only source location"),
         clEnumValN(LocationDumpMode::Range, "range", "Print only byte range")),
+    cat(CompilerCategory));
+
+static opt<bool> DumpIRTypes(
+    "dump-ir-types",
+    desc("Print the inferred types of IR values."),
+    init(true),
     cat(CompilerCategory));
 
 static opt<bool> IncludeEmptyASTNodes(
@@ -1027,6 +1040,7 @@ std::shared_ptr<Context> createContext(
   codeGenOpts.dumpSourceLocation =
       cl::DumpSourceLocation != LocationDumpMode::None;
   codeGenOpts.dumpIRBetweenPasses = cl::DumpBetweenPasses;
+  codeGenOpts.dumpIRTypes = cl::DumpIRTypes;
   if (cl::BytecodeFormat == cl::BytecodeFormatKind::HBC) {
     codeGenOpts.unlimitedRegisters = false;
   }
@@ -1096,6 +1110,8 @@ std::shared_ptr<Context> createContext(
     // By default with no optimization, use lazy compilation for "large" files
     context->setLazyCompilation(true);
   }
+
+  context->setObjectScoping(cl::ObjectScoping);
 
   if (cl::CommonJS) {
     context->setUseCJSModules(true);

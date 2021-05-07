@@ -1246,6 +1246,33 @@ void HBCISel::generateGetParentScopeInst(
     } while ((delta -= step) != 0);
   }
 }
+void HBCISel::generateGetObjectScopeParentInst(
+    GetObjectScopeParentInst *Inst,
+    BasicBlock *next) {
+  unsigned startDepth = scopeAnalysis_.getScopeDepth(Inst->getStartScopeDesc());
+  unsigned targetDepth =
+      scopeAnalysis_.getScopeDepth(Inst->getDesiredScopeDesc());
+
+  assert(
+      targetDepth <= startDepth && "Cannot access variables in inner scopes");
+  unsigned delta = startDepth - targetDepth;
+
+  auto resultReg = encodeValue(Inst);
+  auto inputReg = encodeValue(Inst->getStartScope());
+
+  if (delta == 0) {
+    // If the delta is 0, it is just a Mov.
+    if (resultReg != inputReg)
+      BCFGen_->emitMov(resultReg, inputReg);
+  } else {
+    unsigned step;
+    do {
+      step = std::min(delta, (unsigned)UINT8_MAX);
+      BCFGen_->emitGetScopeParent(resultReg, inputReg, step);
+      inputReg = resultReg;
+    } while ((delta -= step) != 0);
+  }
+}
 void HBCISel::generateStoreVariableInst(
     StoreVariableInst *Inst,
     BasicBlock *next) {
@@ -1285,6 +1312,43 @@ void HBCISel::generateLoadVariableInst(
   } else {
     BCFGen_->emitLoadFromEnvironmentL(dstReg, envReg, varIdx);
   }
+}
+void HBCISel::generateLoadDynamicInst(LoadDynamicInst *Inst, BasicBlock *next) {
+  if (Inst->getMustExist()) {
+    BCFGen_->emitTryGetDynamic(
+        encodeValue(Inst),
+        encodeValue(Inst->getStartScope()),
+        BCFGen_->getIdentifierID(Inst->getVarName()));
+
+  } else {
+    BCFGen_->emitGetDynamic(
+        encodeValue(Inst),
+        encodeValue(Inst->getStartScope()),
+        BCFGen_->getIdentifierID(Inst->getVarName()));
+  }
+}
+void HBCISel::generateStoreDynamicInst(
+    StoreDynamicInst *Inst,
+    BasicBlock *next) {
+  if (Inst->getStrict()) {
+    BCFGen_->emitTryPutDynamic(
+        encodeValue(Inst->getStartScope()),
+        encodeValue(Inst->getValue()),
+        BCFGen_->getIdentifierID(Inst->getVarName()));
+  } else {
+    BCFGen_->emitPutDynamic(
+        encodeValue(Inst->getStartScope()),
+        encodeValue(Inst->getValue()),
+        BCFGen_->getIdentifierID(Inst->getVarName()));
+  }
+}
+void HBCISel::generateReadOnlyVariableInst(
+    ReadOnlyVariableInst *Inst,
+    BasicBlock *next) {
+  BCFGen_->emitReadOnlyProp(
+      encodeValue(Inst->getStartScope()),
+      BCFGen_->getIdentifierID(Inst->getVarName()),
+      Inst->getThrowOnWrite());
 }
 void HBCISel::generateHBCLoadConstInst(
     hermes::HBCLoadConstInst *Inst,
@@ -1362,6 +1426,24 @@ void HBCISel::generateCreateScopeInst(
       dstReg,
       encodeValue(Inst->getParentScope()),
       Inst->getScopeDesc()->getNumVariables());
+}
+
+void HBCISel::generateCreateStaticObjectScopeInst(
+    CreateStaticObjectScopeInst *Inst,
+    BasicBlock *next) {
+  BCFGen_->emitNewStaticScope(
+      encodeValue(Inst),
+      encodeValue(Inst->getParentScope()),
+      std::min(255u, Inst->getScopeDesc()->getNumVariables()));
+}
+
+void HBCISel::generateCreateDynamicObjectScopeInst(
+    CreateDynamicObjectScopeInst *Inst,
+    BasicBlock *next) {
+  BCFGen_->emitNewDynamicScope(
+      encodeValue(Inst),
+      encodeValue(Inst->getParentScope()),
+      encodeValue(Inst->getWithValue()));
 }
 
 void HBCISel::generateHBCProfilePointInst(

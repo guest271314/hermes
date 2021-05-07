@@ -95,6 +95,8 @@ unsigned InstructionNamer::getNumber(Value *T) {
 }
 
 void IRPrinter::printTypeLabel(Type T) {
+  if (!ctx_.getCodeGenerationSettings().dumpIRTypes)
+    return;
   // We don't print type annotations for unknown types.
   if (T.isAnyType())
     return;
@@ -104,7 +106,7 @@ void IRPrinter::printTypeLabel(Type T) {
 void IRPrinter::printValueLabel(Instruction *I, Value *V, unsigned opIndex) {
   auto printScopeName = [this, I](ScopeDesc *SD) {
     if (!SD) {
-      os << "0";
+      os << "null";
       return;
     }
     os << "%S" << ScopeNamer.getNumber(SD);
@@ -173,9 +175,29 @@ void IRPrinter::printValueLabel(Instruction *I, Value *V, unsigned opIndex) {
   } else if (auto *SD = dyn_cast<ScopeDesc>(V)) {
     printScopeName(SD);
     // In some special instructions, dump the contents of the scope.
-    if (isa<CreateScopeInst>(I)) {
+    if (isa<CreateScopeInst>(I) || isa<CreateStaticObjectScopeInst>(I) ||
+        isa<CreateDynamicObjectScopeInst>(I)) {
       os << "{p:";
       printScopeName(SD->getParent());
+      switch (SD->getScopeKind()) {
+        case ScopeDesc::Kind::Env:
+          break;
+        case ScopeDesc::Kind::StaticObject:
+          os << ", o:static";
+          break;
+        case ScopeDesc::Kind::Eval:
+          os << ", o:eval";
+          break;
+        case ScopeDesc::Kind::With:
+          os << ", o:with";
+          break;
+        case ScopeDesc::Kind::Unknown:
+          os << ", o:unknown";
+          break;
+        case ScopeDesc::Kind::Global:
+          os << ", o:global";
+          break;
+      }
       if (!SD->getVariables().empty()) {
         os << ", v:[";
         unsigned i = 0;

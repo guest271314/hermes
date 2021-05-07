@@ -151,8 +151,11 @@ bool Value::hasUser(Value *other) {
 //===----------------------------------------------------------------------===//
 // class ScopeDesc
 
-ScopeDesc::ScopeDesc(Function *function, ScopeDesc *parent)
-    : Value(ValueKind::ScopeDescKind), function_(function), parent_(parent) {}
+ScopeDesc::ScopeDesc(Function *function, ScopeDesc *parent, Kind kind)
+    : Value(ValueKind::ScopeDescKind),
+      function_(function),
+      parent_(parent),
+      scopeKind_(kind) {}
 
 ScopeDesc::~ScopeDesc() {
   // Free all variables.
@@ -521,8 +524,10 @@ Context &Function::getContext() const {
   return parent_->getContext();
 }
 
-ScopeDesc *Function::createScopeDesc(ScopeDesc *parentScope) {
-  auto *scope = new ScopeDesc(this, parentScope);
+ScopeDesc *Function::createScopeDesc(
+    ScopeDesc *parentScope,
+    ScopeDesc::Kind kind) {
+  auto *scope = new ScopeDesc(this, parentScope, kind);
   scopes_.push_back(scope);
   if (parentScope)
     parentScope->addChild(scope);
@@ -784,12 +789,6 @@ LiteralString *Module::getLiteralString(Identifier value) {
   auto New = new LiteralString(value);
   literalStrings.InsertNode(New, InsertPos);
   return New;
-}
-
-LiteralBool *Module::getLiteralBool(bool value) {
-  if (value)
-    return &literalTrue;
-  return &literalFalse;
 }
 
 void Type::print(llvh::raw_ostream &OS) const {

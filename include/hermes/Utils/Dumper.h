@@ -49,6 +49,7 @@ struct IRPrinter : public IRVisitor<IRPrinter, void> {
   /// Indentation level.
   unsigned Indent;
 
+  Context &ctx_;
   SourceErrorManager &sm_;
   /// Output stream.
   llvh::raw_ostream &os;
@@ -62,6 +63,7 @@ struct IRPrinter : public IRVisitor<IRPrinter, void> {
 
   explicit IRPrinter(Context &ctx, llvh::raw_ostream &ost, bool escape = false)
       : Indent(0),
+        ctx_(ctx),
         sm_(ctx.getSourceErrorManager()),
         os(ost),
         needEscape(escape) {}

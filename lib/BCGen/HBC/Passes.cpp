@@ -197,6 +197,22 @@ bool LoadConstants::operandMustBeLiteral(Instruction *Inst, unsigned opIndex) {
   if (llvh::isa<DeclareGlobalVarInst>(Inst))
     return true;
 
+  if (llvh::isa<LoadDynamicInst>(Inst) &&
+      (opIndex == LoadDynamicInst::MustExistIdx ||
+       opIndex == LoadDynamicInst::VarNameIdx)) {
+    return true;
+  }
+  if ((llvh::isa<StoreDynamicInst>(Inst)) &&
+      (opIndex == StoreDynamicInst::StrictIdx ||
+       opIndex == StoreDynamicInst::VarNameIdx)) {
+    return true;
+  }
+  if (llvh::isa<ReadOnlyVariableInst>(Inst) &&
+      (opIndex == ReadOnlyVariableInst::ThrowOnWriteIdx ||
+       opIndex == ReadOnlyVariableInst::VarIdx)) {
+    return true;
+  }
+
   return false;
 }
 
@@ -294,17 +310,49 @@ bool LowerLoadStoreFrameInst::runOnFunction(Function *F) {
       builder.setLocation(Inst->getLocation());
 
       switch (Inst->getKind()) {
+        case ValueKind::CreateScopeInstKind: {
+          auto *CSI = cast<CreateScopeInst>(Inst);
+          if (!CSI->getScopeDesc()->isObject())
+            continue;
+
+          builder.setInsertionPoint(Inst);
+          Instruction *newInst;
+          if (CSI->getScopeDesc()->isDynamicObject()) {
+            newInst = builder.createCreateDynamicObjectScopeInst(
+                CSI->getParentScope(), CSI->getScopeDesc(), nullptr);
+          } else {
+            newInst = builder.createCreateStaticObjectScopeInst(
+                CSI->getParentScope(), CSI->getScopeDesc());
+          }
+          CSI->replaceAllUsesWith(newInst);
+          CSI->eraseFromParent();
+          break;
+        }
         case ValueKind::LoadVariableInstKind: {
           auto *LVI = cast<LoadVariableInst>(Inst);
           auto *var = LVI->getVar();
 
-          if (var->getScope() != LVI->getStartScopeDesc()) {
-            builder.setInsertionPoint(Inst);
-            auto *resolved = builder.createGetParentScopeInst(
-                LVI->getStartScope(),
-                LVI->getStartScopeDesc(),
-                var->getScope());
-            LVI->updateStartScope(resolved, var->getScope());
+          builder.setInsertionPoint(Inst);
+          if (!var->getScope()->isObject()) {
+            if (var->getScope() != LVI->getStartScopeDesc()) {
+              Value *resolved = builder.createGetParentScopeInst(
+                  LVI->getStartScope(),
+                  LVI->getStartScopeDesc(),
+                  var->getScope());
+              LVI->updateStartScope(resolved, var->getScope());
+            }
+          } else {
+            Value *resolved = LVI->getStartScope();
+            if (var->getScope() != LVI->getStartScopeDesc()) {
+              resolved = builder.createGetObjectScopeParentInst(
+                  LVI->getStartScope(),
+                  LVI->getStartScopeDesc(),
+                  var->getScope());
+            }
+            auto *LP = builder.createLoadPropertyInst(
+                resolved, LVI->getVar()->getName());
+            LVI->replaceAllUsesWith(LP);
+            LVI->eraseFromParent();
           }
           changed = true;
           break;
@@ -313,13 +361,53 @@ bool LowerLoadStoreFrameInst::runOnFunction(Function *F) {
           auto *SVI = cast<StoreVariableInst>(Inst);
           auto *var = SVI->getTargetVar();
 
-          if (var->getScope() != SVI->getStartScopeDesc()) {
-            builder.setInsertionPoint(Inst);
-            auto *resolved = builder.createGetParentScopeInst(
-                SVI->getStartScope(),
-                SVI->getStartScopeDesc(),
-                var->getScope());
-            SVI->updateStartScope(resolved, var->getScope());
+          builder.setInsertionPoint(Inst);
+          if (!var->getScope()->isObject()) {
+            if (var->getScope() != SVI->getStartScopeDesc()) {
+              auto *resolved = builder.createGetParentScopeInst(
+                  SVI->getStartScope(),
+                  SVI->getStartScopeDesc(),
+                  var->getScope());
+              SVI->updateStartScope(resolved, var->getScope());
+            }
+          } else {
+            Value *resolved = SVI->getStartScope();
+            if (var->getScope() != SVI->getStartScopeDesc()) {
+              resolved = builder.createGetObjectScopeParentInst(
+                  SVI->getStartScope(),
+                  SVI->getStartScopeDesc(),
+                  var->getScope());
+            }
+            auto *SP = builder.createStorePropertyInst(
+                SVI->getValue(), resolved, SVI->getTargetVar()->getName());
+            SVI->replaceAllUsesWith(SP);
+            SVI->eraseFromParent();
+          }
+          changed = true;
+          break;
+        }
+        case ValueKind::ReadOnlyVariableInstKind: {
+          assert(
+              !Inst->hasUsers() && "ReadOnlyVariableInst shouldn't have users");
+          auto *ROV = cast<ReadOnlyVariableInst>(Inst);
+          auto *var = ROV->getVar();
+          if (!var->getScope()->isObject()) {
+            // In static mode this instruction is not needed.
+            Inst->eraseFromParent();
+          } else {
+            if (var->getScope() != ROV->getStartScopeDesc()) {
+              auto *resolved = builder.createGetParentScopeInst(
+                  ROV->getStartScope(),
+                  ROV->getStartScopeDesc(),
+                  var->getScope());
+              ROV->updateStartScope(resolved, var->getScope());
+            }
+            Value *varOrName = ROV->getVarOrName();
+            // Lower variables to a literal string.
+            if (isa<ScopeVar>(varOrName)) {
+              ROV->setName(builder.getLiteralString(
+                  cast<ScopeVar>(varOrName)->getName()));
+            }
           }
           changed = true;
           break;

@@ -97,13 +97,13 @@ DEFINE_OPCODE_2(NewObjectWithParent, Reg8, Reg8)
 /// Create a new empty static scope with the specified parent, which must be
 /// valid.
 /// Arg1 = the created object
-/// Arg2 = the parent.
+/// Arg2 = the parent. if JS null, the global scope is used.
 /// Arg3 = number of variables hint
 DEFINE_OPCODE_3(NewStaticScope, Reg8, Reg8, UInt8)
 
 /// Create a new dynamic scope with an optional "with" object.
 /// Arg1 = the created object
-/// Arg2 = the parent.
+/// Arg2 = the parent. if JS null, the global scope is used.
 /// Arg3 = the optional "with" object. If "empty" it is not used, otherwise
 ///     it ?ToObject(Arg3) is used as the parent.
 DEFINE_OPCODE_3(NewDynamicScope, Reg8, Reg8, Reg8)
@@ -258,7 +258,7 @@ DEFINE_OPCODE_1(GetFunctionEnvironment, Reg8)
 
 /// Create a new environment with the specified parent.
 /// Arg1 = the new environment
-/// Arg2 = the parent environment or undefined for the global one.
+/// Arg2 = the parent environment or null for the global one.
 /// Arg3 = the number of slots in the environment.
 DEFINE_OPCODE_3(CreateEnvironment, Reg8, Reg8, UInt16)
 

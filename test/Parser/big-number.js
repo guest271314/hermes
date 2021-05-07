@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// RUN: %hermes -O0 -dump-ir %s | %FileCheck %s --match-full-lines
+// RUN: %hermesc -O0 -dump-ir %s | %FileCheck %s --match-full-lines
 
 // This test ensures that a very large numeric literal can be parsed as
 // Infinity.
@@ -15,8 +15,4 @@
 55e55555555555555555555555555555555555;
 
 //CHECK-LABEL:function global()
-//CHECK-NEXT:%BB0:
-//CHECK-NEXT:  %0 = CreateScopeInst undefined : undefined, %S0{p:0}
-//CHECK-NEXT:  %1 = AllocStackInst $?anon_0_ret
-//CHECK-NEXT:  %2 = StoreStackInst undefined : undefined, %1
-//CHECK-NEXT:  %3 = StoreStackInst Infinity : number, %1
+//CHECK:  %{{.}} = StoreStackInst Infinity : number, %1

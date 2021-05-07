@@ -6,7 +6,7 @@
  */
 
 // RUN: %hermes -commonjs %S/cjs-multiple-1.js %S/cjs-multiple-2.js | %FileCheck --match-full-lines %s
-// RUN: %hermes -O -commonjs %S/cjs-multiple-1.js %S/cjs-multiple-2.js | %FileCheck --match-full-lines %s
+// RUN: %hermes -fobject-scoping -commonjs %S/cjs-multiple-1.js %S/cjs-multiple-2.js | %FileCheck --match-full-lines %s
 print('initializing module 1');
 
 var module2 = require('./cjs-multiple-2.js')

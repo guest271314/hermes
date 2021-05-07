@@ -50,6 +50,17 @@ Identifier FunctionContext::genAnonymousLabelName(StringRef hint) {
   return function->getContext().getIdentifier(nameBuilder.str());
 }
 
+void FunctionContext::addAvailableScope(ScopeDesc *desc, Value *value) {
+  auto res = availableScopes_.try_emplace(desc, value);
+  (void)res;
+  assert(res.second && "scope is already marked as available");
+}
+
+void FunctionContext::removeAvailableScope(ScopeDesc *desc) {
+  assert(availableScopes_.count(desc) && "scope is not marked as available");
+  availableScopes_.erase(desc);
+}
+
 //===----------------------------------------------------------------------===//
 // ESTreeIRGen
 
@@ -78,7 +89,7 @@ void ESTreeIRGen::genFunctionDeclaration(
   auto *newClosure = Builder.createCreateFunctionInst(
       newFunc, currentIRScope_, currentIRScopeDesc_);
 
-  emitStore(newClosure, funcStorage, true);
+  emitStaticStore(newClosure, funcStorage, true);
 }
 
 Value *ESTreeIRGen::genFunctionExpression(
@@ -115,7 +126,7 @@ Value *ESTreeIRGen::genFunctionExpression(
       newFunc, currentIRScope_, currentIRScopeDesc_);
 
   if (nameVar)
-    emitStore(closure, nameVar, true);
+    emitStaticStore(closure, nameVar, true);
 
   return closure;
 }
@@ -436,7 +447,7 @@ void ESTreeIRGen::initCaptureStateInES5FunctionHelper() {
   // "this".
   curFunction()->capturedThis =
       newLocalVar(VarDecl::Kind::Var, genAnonymousLabelName("this"));
-  emitStore(
+  emitStaticStore(
       Builder.getFunction()->getThisParameter(),
       curFunction()->capturedThis,
       true);
@@ -444,14 +455,14 @@ void ESTreeIRGen::initCaptureStateInES5FunctionHelper() {
   // "new.target".
   curFunction()->capturedNewTarget =
       newLocalVar(VarDecl::Kind::Var, genAnonymousLabelName("new.target"));
-  emitStore(
+  emitStaticStore(
       Builder.createGetNewTargetInst(), curFunction()->capturedNewTarget, true);
 
   // "arguments".
   if (curFunction()->getSemInfo()->containsArrowFunctionsUsingArguments) {
     curFunction()->capturedArguments =
         newLocalVar(VarDecl::Kind::Var, genAnonymousLabelName("arguments"));
-    emitStore(
+    emitStaticStore(
         curFunction()->createArgumentsInst,
         curFunction()->capturedArguments,
         true);

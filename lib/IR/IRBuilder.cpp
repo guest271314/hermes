@@ -635,8 +635,7 @@ GetFunctionParentScopeInst *IRBuilder::createGetFunctionParentScopeInst(
 CreateScopeInst *IRBuilder::createCreateScopeInst(
     Value *parentScope,
     ScopeDesc *scopeDesc) {
-  auto *I = new CreateScopeInst(
-      parentScope ? parentScope : getLiteralUndefined(), scopeDesc);
+  auto *I = new CreateScopeInst(parentScope, scopeDesc);
   insert(I);
   return I;
 }
@@ -647,6 +646,42 @@ GetParentScopeInst *IRBuilder::createGetParentScopeInst(
     ScopeDesc *desiredScopeDesc) {
   auto *I =
       new GetParentScopeInst(startScope, startScopeDesc, desiredScopeDesc);
+  insert(I);
+  return I;
+}
+
+CreateStaticObjectScopeInst *IRBuilder::createCreateStaticObjectScopeInst(
+    Value *parentScope,
+    ScopeDesc *scopeDesc) {
+  assert(
+      scopeDesc->isStaticObject() && "Scope should be a static object scope");
+  auto *I = new CreateStaticObjectScopeInst(
+      parentScope ? parentScope : getGlobalObject(), scopeDesc);
+  insert(I);
+  return I;
+}
+
+CreateDynamicObjectScopeInst *IRBuilder::createCreateDynamicObjectScopeInst(
+    Value *parentScope,
+    ScopeDesc *scopeDesc,
+    Value *withValue) {
+  assert(
+      scopeDesc->isDynamicObject() && "Scope should be a dynamic object scope");
+  auto *I = new CreateDynamicObjectScopeInst(
+      parentScope ? parentScope : getGlobalObject(),
+      scopeDesc,
+      withValue ? withValue : getLiteralEmpty());
+  insert(I);
+  return I;
+}
+
+GetObjectScopeParentInst *IRBuilder::createGetObjectScopeParentInst(
+    Value *startScope,
+    ScopeDesc *startScopeDesc,
+    ScopeDesc *desiredScopeDesc) {
+  assert(startScopeDesc->isObject() && "Scope should be a static object scope");
+  auto *I = new GetObjectScopeParentInst(
+      startScope, startScopeDesc, desiredScopeDesc);
   insert(I);
   return I;
 }
@@ -666,6 +701,40 @@ StoreVariableInst *IRBuilder::createStoreVariableInst(
     Value *startScope,
     ScopeDesc *startScopeDesc) {
   auto *I = new StoreVariableInst(value, targetVar, startScope, startScopeDesc);
+  insert(I);
+  return I;
+}
+
+ReadOnlyVariableInst *IRBuilder::createReadOnlyVariableInst(
+    bool throwOnWrite,
+    ScopeVar *var,
+    Value *startScope,
+    ScopeDesc *startScopeDesc) {
+  auto *I = new ReadOnlyVariableInst(
+      getLiteralBool(throwOnWrite), var, startScope, startScopeDesc);
+  insert(I);
+  return I;
+}
+
+LoadDynamicInst *IRBuilder::createLoadDynamicInst(
+    bool mustExist,
+    LiteralString *varName,
+    Value *startScope,
+    ScopeDesc *startScopeDesc) {
+  auto *I = new LoadDynamicInst(
+      getLiteralBool(mustExist), varName, startScope, startScopeDesc);
+  insert(I);
+  return I;
+}
+
+StoreDynamicInst *IRBuilder::createStoreDynamicInst(
+    bool strict,
+    Value *value,
+    LiteralString *varName,
+    Value *startScope,
+    ScopeDesc *startScopeDesc) {
+  auto *I = new StoreDynamicInst(
+      getLiteralBool(strict), value, varName, startScope, startScopeDesc);
   insert(I);
   return I;
 }

@@ -2130,8 +2130,10 @@ tailCall:
       }
 
       CASE(GetFunctionEnvironment) {
-        O1REG(GetFunctionEnvironment) = HermesValue::encodeObjectValue(
-            FRAME.getCalleeClosureUnsafe()->getEnvironment(runtime));
+        auto *env = FRAME.getCalleeClosureUnsafe()->getEnvironment(runtime);
+        O1REG(GetFunctionEnvironment) = env
+            ? HermesValue::encodeObjectValue(env)
+            : HermesValue::encodeNullValue();
         ip = NEXTINST(GetFunctionEnvironment);
         DISPATCH;
       }
@@ -2139,9 +2141,9 @@ tailCall:
         CAPTURE_IP(
             res = Environment::create(
                 runtime,
-                O2REG(CreateEnvironment).isObject()
-                    ? Handle<GCCell>::vmcast(&O2REG(CreateEnvironment))
-                    : Handle<GCCell>::vmcast_or_null(&runtime->nullPointer_),
+                O2REG(CreateEnvironment).isNull()
+                    ? runtime->makeNullHandle<GCCell>()
+                    : Handle<GCCell>::vmcast(&O2REG(CreateEnvironment)),
                 ip->iCreateEnvironment.op3));
         if (res == ExecutionStatus::EXCEPTION) {
           goto exception;
@@ -2995,7 +2997,10 @@ tailCall:
         CAPTURE_IP(
             O1REG(NewStaticScope) =
                 StaticScope::create(
-                    runtime, Handle<JSObject>::vmcast(&O2REG(NewStaticScope)))
+                    runtime,
+                    O2REG(NewStaticScope).isNull()
+                        ? runtime->getGlobal()
+                        : Handle<JSObject>::vmcast(&O2REG(NewStaticScope)))
                     .getHermesValue());
         assert(
             gcScope.getHandleCountDbg() == KEEP_HANDLES &&

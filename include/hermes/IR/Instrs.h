@@ -2093,6 +2093,135 @@ class GetParentScopeInst : public Instruction {
   }
 };
 
+class CreateStaticObjectScopeInst : public Instruction {
+  CreateStaticObjectScopeInst(const CreateStaticObjectScopeInst &) = delete;
+  void operator=(const CreateStaticObjectScopeInst &) = delete;
+
+ public:
+  enum { ParentScopeIdx, ScopeDescIdx };
+
+  explicit CreateStaticObjectScopeInst(Value *parentScope, ScopeDesc *scopeDesc)
+      : Instruction(ValueKind::CreateStaticObjectScopeInstKind) {
+    pushOperand(parentScope);
+    pushOperand(scopeDesc);
+    setType(Type::createObject());
+  }
+  explicit CreateStaticObjectScopeInst(
+      const CreateStaticObjectScopeInst *src,
+      llvh::ArrayRef<Value *> operands)
+      : Instruction(src, operands) {}
+
+  Value *getParentScope() const {
+    return getOperand(ParentScopeIdx);
+  }
+  ScopeDesc *getScopeDesc() const {
+    return cast<ScopeDesc>(getOperand(ScopeDescIdx));
+  }
+
+  SideEffectKind getSideEffect() {
+    return SideEffectKind::None;
+  }
+
+  WordBitSet<> getChangedOperandsImpl() {
+    return {};
+  }
+
+  static bool classof(const Value *V) {
+    return kindIsA(V->getKind(), ValueKind::CreateStaticObjectScopeInstKind);
+  }
+};
+
+class CreateDynamicObjectScopeInst : public Instruction {
+  CreateDynamicObjectScopeInst(const CreateDynamicObjectScopeInst &) = delete;
+  void operator=(const CreateDynamicObjectScopeInst &) = delete;
+
+ public:
+  enum { ParentScopeIdx, ScopeDescIdx, WithValueIdx };
+
+  explicit CreateDynamicObjectScopeInst(
+      Value *parentScope,
+      ScopeDesc *scopeDesc,
+      Value *withValue)
+      : Instruction(ValueKind::CreateDynamicObjectScopeInstKind) {
+    pushOperand(parentScope);
+    pushOperand(scopeDesc);
+    pushOperand(withValue);
+    setType(Type::createObject());
+  }
+  explicit CreateDynamicObjectScopeInst(
+      const CreateDynamicObjectScopeInst *src,
+      llvh::ArrayRef<Value *> operands)
+      : Instruction(src, operands) {}
+
+  Value *getParentScope() const {
+    return getOperand(ParentScopeIdx);
+  }
+  ScopeDesc *getScopeDesc() const {
+    return cast<ScopeDesc>(getOperand(ScopeDescIdx));
+  }
+  Value *getWithValue() const {
+    return getOperand(WithValueIdx);
+  }
+
+  SideEffectKind getSideEffect() {
+    return isa<LiteralEmpty>(getWithValue()) ? SideEffectKind::None
+                                             : SideEffectKind::Unknown;
+  }
+
+  WordBitSet<> getChangedOperandsImpl() {
+    return {};
+  }
+
+  static bool classof(const Value *V) {
+    return kindIsA(V->getKind(), ValueKind::CreateDynamicObjectScopeInstKind);
+  }
+};
+
+class GetObjectScopeParentInst : public Instruction {
+  GetObjectScopeParentInst(const GetObjectScopeParentInst &) = delete;
+  void operator=(const GetObjectScopeParentInst &) = delete;
+
+ public:
+  enum { StartScopeIdx, StartScopeDescIdx, DesiredScopeDescIdx };
+
+  explicit GetObjectScopeParentInst(
+      Value *startScope,
+      ScopeDesc *startScopeDesc,
+      ScopeDesc *desiredScopeDesc)
+      : Instruction(ValueKind::GetObjectScopeParentInstKind) {
+    pushOperand(startScope);
+    pushOperand(startScopeDesc);
+    pushOperand(desiredScopeDesc);
+    setType(Type::createObject());
+  }
+  explicit GetObjectScopeParentInst(
+      const GetObjectScopeParentInst *src,
+      llvh::ArrayRef<Value *> operands)
+      : Instruction(src, operands) {}
+
+  Value *getStartScope() const {
+    return getOperand(StartScopeIdx);
+  }
+  ScopeDesc *getStartScopeDesc() const {
+    return cast<ScopeDesc>(getOperand(StartScopeDescIdx));
+  }
+  ScopeDesc *getDesiredScopeDesc() const {
+    return cast<ScopeDesc>(getOperand(DesiredScopeDescIdx));
+  }
+
+  SideEffectKind getSideEffect() {
+    return SideEffectKind::None;
+  }
+
+  WordBitSet<> getChangedOperandsImpl() {
+    return {};
+  }
+
+  static bool classof(const Value *V) {
+    return kindIsA(V->getKind(), ValueKind::GetObjectScopeParentInstKind);
+  }
+};
+
 class LoadVariableInst : public Instruction {
   LoadVariableInst(const LoadVariableInst &) = delete;
   void operator=(const LoadVariableInst &) = delete;
@@ -2194,6 +2323,185 @@ class StoreVariableInst : public Instruction {
 
   static bool classof(const Value *V) {
     return kindIsA(V->getKind(), ValueKind::StoreVariableInstKind);
+  }
+};
+
+class ReadOnlyVariableInst : public Instruction {
+  ReadOnlyVariableInst(const ReadOnlyVariableInst &) = delete;
+  void operator=(const ReadOnlyVariableInst &) = delete;
+
+ public:
+  enum { ThrowOnWriteIdx, VarIdx, StartScopeIdx, StartScopeDescIdx };
+
+  explicit ReadOnlyVariableInst(
+      LiteralBool *throwOnWrite,
+      ScopeVar *var,
+      Value *startScope,
+      ScopeDesc *startScopeDesc)
+      : Instruction(ValueKind::ReadOnlyVariableInstKind) {
+    setType(Type::createNoType());
+    pushOperand(throwOnWrite);
+    pushOperand(var);
+    pushOperand(startScope);
+    pushOperand(startScopeDesc);
+  }
+  explicit ReadOnlyVariableInst(
+      const ReadOnlyVariableInst *src,
+      llvh::ArrayRef<Value *> operands)
+      : Instruction(src, operands) {}
+
+  bool getThrowOnWrite() const {
+    return cast<LiteralBool>(getOperand(ThrowOnWriteIdx))->getValue();
+  }
+  Value *getVarOrName() const {
+    return getOperand(VarIdx);
+  }
+  ScopeVar *getVar() const {
+    return cast<ScopeVar>(getVarOrName());
+  }
+  LiteralString *getVarName() const {
+    return cast<LiteralString>(getVarOrName());
+  }
+  Value *getStartScope() const {
+    return getOperand(StartScopeIdx);
+  }
+  ScopeDesc *getStartScopeDesc() const {
+    return cast<ScopeDesc>(getOperand(StartScopeDescIdx));
+  }
+
+  void updateStartScope(Value *startScope, ScopeDesc *startScopeDesc) {
+    setOperand(startScope, StartScopeIdx);
+    setOperand(startScopeDesc, StartScopeDescIdx);
+  }
+
+  void setName(LiteralString *name) {
+    setOperand(name, VarIdx);
+  }
+
+  SideEffectKind getSideEffect() {
+    return SideEffectKind::MayWrite;
+  }
+
+  WordBitSet<> getChangedOperandsImpl() {
+    return {};
+  }
+
+  static bool classof(const Value *V) {
+    return kindIsA(V->getKind(), ValueKind::ReadOnlyVariableInstKind);
+  }
+};
+
+class LoadDynamicInst : public Instruction {
+  LoadDynamicInst(const LoadDynamicInst &) = delete;
+  void operator=(const LoadDynamicInst &) = delete;
+
+ public:
+  enum { MustExistIdx, VarNameIdx, StartScopeIdx, StartScopeDescIdx };
+
+  explicit LoadDynamicInst(
+      LiteralBool *mustExist,
+      LiteralString *varName,
+      Value *startScope,
+      ScopeDesc *startScopeDesc)
+      : Instruction(ValueKind::LoadDynamicInstKind) {
+    setType(Type::subtractTy(Type::createAnyType(), Type::createEmpty()));
+    pushOperand(mustExist);
+    pushOperand(varName);
+    pushOperand(startScope);
+    pushOperand(startScopeDesc);
+  }
+  explicit LoadDynamicInst(
+      const LoadDynamicInst *src,
+      llvh::ArrayRef<Value *> operands)
+      : Instruction(src, operands) {}
+
+  bool getMustExist() const {
+    return cast<LiteralBool>(getOperand(MustExistIdx))->getValue();
+  }
+  LiteralString *getVarName() const {
+    return cast<LiteralString>(getOperand(VarNameIdx));
+  }
+  Value *getStartScope() const {
+    return getOperand(StartScopeIdx);
+  }
+  ScopeDesc *getStartScopeDesc() const {
+    return cast<ScopeDesc>(getOperand(StartScopeDescIdx));
+  }
+
+  void updateStartScope(Value *startScope, ScopeDesc *startScopeDesc) {
+    setOperand(startScope, StartScopeIdx);
+    setOperand(startScopeDesc, StartScopeDescIdx);
+  }
+
+  SideEffectKind getSideEffect() {
+    return SideEffectKind::Unknown;
+  }
+
+  WordBitSet<> getChangedOperandsImpl() {
+    return {};
+  }
+
+  static bool classof(const Value *V) {
+    return kindIsA(V->getKind(), ValueKind::LoadDynamicInstKind);
+  }
+};
+
+class StoreDynamicInst : public Instruction {
+  StoreDynamicInst(const StoreDynamicInst &) = delete;
+  void operator=(const StoreDynamicInst &) = delete;
+
+ public:
+  enum { StrictIdx, ValueIdx, VarNameIdx, StartScopeIdx, StartScopeDescIdx };
+
+  explicit StoreDynamicInst(
+      LiteralBool *strict,
+      Value *value,
+      LiteralString *varName,
+      Value *startScope,
+      ScopeDesc *startScopeDesc)
+      : Instruction(ValueKind::StoreDynamicInstKind) {
+    pushOperand(strict);
+    pushOperand(value);
+    pushOperand(varName);
+    pushOperand(startScope);
+    pushOperand(startScopeDesc);
+  }
+  explicit StoreDynamicInst(
+      const StoreDynamicInst *src,
+      llvh::ArrayRef<Value *> operands)
+      : Instruction(src, operands) {}
+
+  bool getStrict() const {
+    return cast<LiteralBool>(getOperand(StrictIdx))->getValue();
+  }
+  Value *getValue() const {
+    return getOperand(ValueIdx);
+  }
+  LiteralString *getVarName() const {
+    return cast<LiteralString>(getOperand(VarNameIdx));
+  }
+  Value *getStartScope() const {
+    return getOperand(StartScopeIdx);
+  }
+  ScopeDesc *getStartScopeDesc() const {
+    return cast<ScopeDesc>(getOperand(StartScopeDescIdx));
+  }
+
+  void updateStartScope(Value *startScope, ScopeDesc *startScopeDesc) {
+    setOperand(startScope, StartScopeIdx);
+    setOperand(startScopeDesc, StartScopeDescIdx);
+  }
+
+  SideEffectKind getSideEffect() {
+    return SideEffectKind::Unknown;
+  }
+
+  WordBitSet<> getChangedOperandsImpl() {
+    return {};
+  }
+
+  static bool classof(const Value *V) {
+    return kindIsA(V->getKind(), ValueKind::StoreDynamicInstKind);
   }
 };
 

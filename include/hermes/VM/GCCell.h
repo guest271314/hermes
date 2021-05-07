@@ -65,6 +65,11 @@ class GCCell {
   GCCell(const GCCell &) = delete;
   void operator=(const GCCell &) = delete;
 
+  /// Every GCCell is a GCCell!
+  static bool classof(const GCCell *) {
+    return true;
+  }
+
   /// Return the allocated size of the object in bytes.
   uint32_t getAllocatedSize() const;
 

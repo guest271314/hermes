@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// RUN: (! %hermes -strict -dump-ir %s) 2>&1 | %FileCheck %s --match-full-lines
+// RUN: %hermes -strict %s 2>&1 | %FileCheck %s --match-full-lines
 
 function one() { return s; return s; }
 //CHECK: {{.*}}diagnode_errors.js:10:25: warning: the variable "s" was not declared in function "one"
@@ -22,11 +22,11 @@ function three() { return z; return z;}
 //CHECK-NEXT: function three() { return z; return z;}
 //CHECK-NEXT:                           ^
 
-function four() { with({}) {}; }
-//CHECK: {{.*}}diagnode_errors.js:25:19: error: invalid statement encountered.
-//CHECK-NEXT: function four() { with({}) {}; }
-//CHECK-NEXT:                   ^~~~~~~~~~~
 
+
+
+
+if (0)
 (function () { return inAnonymous; })()
 //CHECK: {{.*}}warning: the variable "inAnonymous" was not declared in anonymous function ""
 //CHECK-NEXT: (function () { return inAnonymous; })()
@@ -37,9 +37,9 @@ function four() { with({}) {}; }
 //CHECK-NEXT: (() => { return inAnonymousArrow; })()
 //CHECK-NEXT:                 ^~~~~~~~~~~~~~~~
 
-var inferredName = () => { return i }; inferredName();
+var inferredName = () => { return i }; 
 //CHECK: {{.*}}warning: the variable "i" was not declared in arrow function "inferredName"
-//CHECK-NEXT: var inferredName = () => { return i }; inferredName();
+//CHECK-NEXT: var inferredName = () => { return i };
 //CHECK-NEXT:                                   ^
 
 //CHECK:{{.*}}warning: the property "color" was set multiple times in the object definition.
@@ -49,5 +49,3 @@ var inferredName = () => { return i }; inferredName();
 //CHECK-NEXT:var x = { color: 10, color: 20 };
 //CHECK-NEXT:          ^~~~~~~~~
 var x = { color: 10, color: 20 };
-
-//CHECK: Emitted 1 errors. exiting.

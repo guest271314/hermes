@@ -356,6 +356,10 @@ ExecutionStatus Interpreter::caseNewDynamicScope(
     Runtime *runtime,
     PinnedHermesValue *frameRegs,
     const Inst *ip) {
+  auto parent = O2REG(NewDynamicScope).isNull()
+      ? runtime->getGlobal()
+      : Handle<JSObject>::vmcast(&O2REG(NewDynamicScope));
+
   if (!O3REG(NewDynamicScope).isEmpty()) {
     auto cr = toObject(runtime, Handle<>(&O3REG(NewDynamicScope)));
     if (LLVM_UNLIKELY(cr == ExecutionStatus::EXCEPTION))
@@ -363,15 +367,11 @@ ExecutionStatus Interpreter::caseNewDynamicScope(
 
     O1REG(NewDynamicScope) =
         DynamicScope::createForWith(
-            runtime,
-            Handle<JSObject>::vmcast(&O2REG(NewDynamicScope)),
-            runtime->makeHandle<JSObject>(cr.getValue()))
+            runtime, parent, runtime->makeHandle<JSObject>(cr.getValue()))
             .getHermesValue();
   } else {
     O1REG(NewDynamicScope) =
-        DynamicScope::createForEval(
-            runtime, Handle<JSObject>::vmcast(&O2REG(NewDynamicScope)))
-            .getHermesValue();
+        DynamicScope::createForEval(runtime, parent).getHermesValue();
   }
   return ExecutionStatus::RETURNED;
 }

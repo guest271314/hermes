@@ -433,6 +433,13 @@ void SemanticValidator::visit(ReturnStatementNode *returnStmt) {
   visitESTreeChildren(*this, returnStmt);
 }
 
+void SemanticValidator::visit(WithStatementNode *withStmt) {
+  if (curFunction()->strictMode) {
+    sm_.error(withStmt->getStartLoc(), "'with' is not allowed in strict mode");
+  }
+  visitESTreeChildren(*this, withStmt);
+}
+
 void SemanticValidator::visit(YieldExpressionNode *yieldExpr) {
   if (curFunction()->isGlobalScope())
     sm_.error(

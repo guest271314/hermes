@@ -6,7 +6,7 @@
  */
 
 // RUN: %hermes %s | %FileCheck --match-full-lines %s
-// RUN: %hermes -O %s | %FileCheck --match-full-lines %s
+// RUN: %hermes -fobject-scoping %s | %FileCheck --match-full-lines %s
 
 print('AsyncFunction instance');
 // CHECK-LABEL: AsyncFunction instance

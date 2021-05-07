@@ -261,7 +261,8 @@ void Verifier::beforeVisitInstruction(const Instruction &Inst) {
     if (llvh::isa<ScopeVar>(Operand)) {
       Assert(
           llvh::isa<LoadVariableInst>(Inst) ||
-              llvh::isa<StoreVariableInst>(Inst),
+              llvh::isa<StoreVariableInst>(Inst) ||
+              llvh::isa<ReadOnlyVariableInst>(Inst),
           "Variable can only be accessed in LoadVariableInst/StoreVariableInst.");
     }
     if (llvh::isa<AllocStackInst>(Operand)) {
@@ -820,9 +821,38 @@ void Verifier::visitThrowIfEmptyInst(const ThrowIfEmptyInst &Inst) {}
 void Verifier::visitGetParentScopeInst(const GetParentScopeInst &Inst) {}
 void Verifier::visitGetFunctionParentScopeInst(
     const GetFunctionParentScopeInst &Inst) {}
-void Verifier::visitCreateScopeInst(const CreateScopeInst &Inst) {}
+void Verifier::visitCreateStaticObjectScopeInst(
+    const CreateStaticObjectScopeInst &Inst) {
+  auto *parent = Inst.getParentScope();
+  Assert(
+      isa<GlobalObject>(parent) || !isa<Literal>(parent),
+      "Parent scope is a literal but not the global object");
+}
+void Verifier::visitCreateDynamicObjectScopeInst(
+    const CreateDynamicObjectScopeInst &Inst) {
+  auto *parent = Inst.getParentScope();
+  Assert(
+      isa<GlobalObject>(parent) || !isa<Literal>(parent),
+      "Parent scope is a literal but not the global object");
+}
+void Verifier::visitGetObjectScopeParentInst(
+    const GetObjectScopeParentInst &Inst) {}
+void Verifier::visitCreateScopeInst(const CreateScopeInst &Inst) {
+  auto *parent = Inst.getParentScope();
+  Assert(
+      isa<GlobalObject>(parent) || !isa<Literal>(parent),
+      "Parent scope is a literal but not the global object");
+}
 void Verifier::visitLoadVariableInst(const LoadVariableInst &Inst) {}
 void Verifier::visitStoreVariableInst(const StoreVariableInst &Inst) {}
+void Verifier::visitReadOnlyVariableInst(const ReadOnlyVariableInst &Inst) {
+  Assert(
+      isa<ScopeVar>(Inst.getVarOrName()) ||
+          isa<LiteralString>(Inst.getVarOrName()),
+      "ReadOnlyVariableInst operand must be a variable or a string");
+}
+void Verifier::visitLoadDynamicInst(const LoadDynamicInst &Inst) {}
+void Verifier::visitStoreDynamicInst(const StoreDynamicInst &Inst) {}
 void Verifier::visitDeclareGlobalVarInst(const DeclareGlobalVarInst &Inst) {}
 
 } // namespace

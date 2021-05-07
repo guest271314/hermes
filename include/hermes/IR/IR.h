@@ -1289,6 +1289,33 @@ class ScopeVar : public Value {
 
 /// Describes the variables in a scope and the parent scope.
 class ScopeDesc : public Value {
+ public:
+  enum class Kind : uint8_t {
+    /// An environment,
+    Env,
+    /// A static object scope.
+    StaticObject,
+    /// A dynamic object scope for "eval".
+    Eval,
+    /// A dynamic object scope for "with".
+    With,
+    /// Unknown scope.
+    Unknown,
+    /// The global object.
+    Global,
+  };
+
+ private:
+  /// \return true if the kind is an object kind.
+  static bool isObjectKind(Kind k) {
+    return k > Kind::Env;
+  }
+  /// \return true if the kind is a dynamic object kind.
+  static bool isDynamicObjectKind(Kind k) {
+    return k > Kind::StaticObject;
+  }
+
+ private:
   friend class Function;
 
   using Value::Value;
@@ -1301,13 +1328,16 @@ class ScopeDesc : public Value {
   /// The parent scope.
   ScopeDesc *parent_;
 
+  /// What kind of scope is this.
+  Kind scopeKind_;
+
   /// The variables associated with this scope.
   VariableListType variables_{};
 
   /// Child scopes.
   ScopeListType childScopes_{};
 
-  explicit ScopeDesc(Function *function, ScopeDesc *parent);
+  explicit ScopeDesc(Function *function, ScopeDesc *parent, Kind kind);
 
  public:
   ~ScopeDesc();
@@ -1338,6 +1368,26 @@ class ScopeDesc : public Value {
 
   unsigned getNumVariables() const {
     return variables_.size();
+  }
+
+  Kind getScopeKind() const {
+    return scopeKind_;
+  }
+  /// \return true if the kind is an object kind.
+  bool isObject() const {
+    return isObjectKind(scopeKind_);
+  }
+  /// \return true if the kind is a static object kind.
+  bool isStaticObject() const {
+    return scopeKind_ == Kind::StaticObject;
+  }
+  /// \return true if the kind is a dynamic object kind.
+  bool isDynamicObject() const {
+    return isDynamicObjectKind(scopeKind_);
+  }
+  /// \return true if this is the global scope.
+  bool isGlobalScope() const {
+    return scopeKind_ == Kind::Global;
   }
 
  private:
@@ -1622,7 +1672,7 @@ class Function : public llvh::ilist_node_with_parent<Function, Module>,
   }
 
   /// Create a new scope owned by this function.
-  ScopeDesc *createScopeDesc(ScopeDesc *parentScope);
+  ScopeDesc *createScopeDesc(ScopeDesc *parentScope, ScopeDesc::Kind kind);
 
   /// \return the list of scopes owned by this function.
   const llvh::ArrayRef<ScopeDesc *> getScopes() {
@@ -2063,7 +2113,9 @@ class Module : public Value {
   LiteralString *getLiteralString(Identifier value);
 
   /// Create a new literal bool of value \p value.
-  LiteralBool *getLiteralBool(bool value);
+  LiteralBool *getLiteralBool(bool value) {
+    return value ? &literalTrue : &literalFalse;
+  }
 
   /// Create a new literal 'empty'.
   LiteralEmpty *getLiteralEmpty() {

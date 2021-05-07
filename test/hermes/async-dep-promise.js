@@ -6,6 +6,7 @@
  */
 
 // RUN: %hermes %s | %FileCheck --match-full-lines --check-prefix=ON %s
+// RUN: %hermes -fobject-scoping %s | %FileCheck --match-full-lines --check-prefix=ON %s
 // RUN: (! %hermes -Xes6-promise=0 %s 2>&1) | %FileCheck --match-full-lines --check-prefix=OFF %s
 // RUN: %hermesc %s -emit-binary -out %t.hbc && (! %hermes -Xes6-promise=0 %t.hbc 2>&1) | %FileCheck --match-full-lines --check-prefix=OFF %s
 

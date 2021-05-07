@@ -110,7 +110,7 @@ CatchInst *ESTreeIRGen::prepareCatch(ESTree::NodePtr catchParam) {
       VarDecl::Kind::Var,
       getNameFieldFromID(cast<ESTree::IdentifierNode>(catchParam)));
 
-  emitStore(catchInst, catchVar, true);
+  emitStaticStore(catchInst, catchVar, true);
   return catchInst;
 }
 

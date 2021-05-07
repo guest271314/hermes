@@ -31,6 +31,6 @@ try {
 } catch (e) {
     print(e.stack);
 }
-//CHECK: SyntaxError: 1:41:invalid statement encountered.
+//CHECK: SyntaxError: 1:41:'with' is not allowed in strict mode
 //CHECK-NEXT:     at Function (native)
 //CHECK-NEXT:     at global ({{.*}}eval-errors.js:{{.*}}:25)

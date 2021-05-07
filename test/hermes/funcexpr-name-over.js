@@ -5,10 +5,14 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// RUN: %hermes          -O0 %s | %FileCheck %s --match-full-lines
-// RUN: %hermes          -O  %s | %FileCheck %s --match-full-lines
-// RUN: %hermes --strict -O0 %s | %FileCheck %s --match-full-lines --check-prefix=CHKS
-// RUN: %hermes --strict -O  %s | %FileCheck %s --match-full-lines --check-prefix=CHKS
+// RUN: %hermes          -O0                                         %s | %FileCheck %s --match-full-lines
+// RUN: %hermes          -O                                          %s | %FileCheck %s --match-full-lines
+// RUN: %hermes          -O0 -fobject-scoping %s | %FileCheck %s --match-full-lines
+// RUN: %hermes          -O  -fobject-scoping %s | %FileCheck %s --match-full-lines
+// RUN: %hermes --strict -O0                                         %s | %FileCheck %s --match-full-lines --check-prefix=CHKS
+// RUN: %hermes --strict -O                                          %s | %FileCheck %s --match-full-lines --check-prefix=CHKS
+// RUN: %hermes --strict -O0 -fobject-scoping %s | %FileCheck %s --match-full-lines --check-prefix=CHKS
+// RUN: %hermes --strict -O  -fobject-scoping %s | %FileCheck %s --match-full-lines --check-prefix=CHKS
 
 print("start");
 //CHECK-LABEL: start

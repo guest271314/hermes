@@ -131,7 +131,7 @@ Value *ESTreeIRGen::genExpression(ESTree::Node *expr, Identifier nameHint) {
       assert(
           curFunction()->capturedThis &&
           "arrow function must have a captured this");
-      return emitLoad(curFunction()->capturedThis);
+      return emitStaticLoad(curFunction()->capturedThis);
     }
     return curFunction()->function->getThisParameter();
   }
@@ -1519,17 +1519,17 @@ Value *ESTreeIRGen::genIdentifierExpression(
   if (name.str() == "arguments" && !nameTable_.count(name)) {
     // If it is captured, we must use the captured value.
     if (curFunction()->capturedArguments) {
-      return emitLoad(curFunction()->capturedArguments);
+      return emitStaticLoad(curFunction()->capturedArguments);
     }
 
     return curFunction()->createArgumentsInst;
   }
 
-  auto *var = resolveIdentifier(ID);
+  auto var = resolveIdentifier(ID);
 
   // For uses of undefined as the global property, we make an optimization
   // to always return undefined constant.
-  if (llvh::isa<GlobalObjectProperty>(var) && name.str() == "undefined") {
+  if (var.isGlobalProperty() && var.getName().str() == "undefined") {
     return Builder.getLiteralUndefined();
   }
 
@@ -1554,7 +1554,7 @@ Value *ESTreeIRGen::genMetaProperty(ESTree::MetaPropertyNode *MP) {
 
       // If it is a variable, we must issue a load.
       if (auto *V = llvh::dyn_cast<ScopeVar>(value))
-        return emitLoad(V);
+        return emitStaticLoad(V);
 
       return value;
     }

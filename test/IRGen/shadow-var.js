@@ -17,11 +17,11 @@ function foo1(x) {
 }
 //CHECK-LABEL:function foo1(x)
 //CHECK-NEXT:%BB0:
-//CHECK-NEXT:  %0 = GetFunctionParentScopeInst %S0@global
-//CHECK-NEXT:  %1 = CreateScopeInst %0 : object, %S1{p:%S0@global, v:[x]}
-//CHECK-NEXT:  %2 = StoreVariableInst undefined : undefined, [x%S1], %1 : object, %S1
-//CHECK-NEXT:  %3 = StoreVariableInst %x, [x%S1], %1 : object, %S1
-//CHECK-NEXT:  %4 = LoadVariableInst [x%S1], %1 : object, %S1
+//CHECK-NEXT:  %0 = GetFunctionParentScopeInst %S1@global
+//CHECK-NEXT:  %1 = CreateScopeInst %0 : object, %S2{p:%S1@global, v:[x]}
+//CHECK-NEXT:  %2 = StoreVariableInst undefined : undefined, [x%S2], %1 : object, %S2
+//CHECK-NEXT:  %3 = StoreVariableInst %x, [x%S2], %1 : object, %S2
+//CHECK-NEXT:  %4 = LoadVariableInst [x%S2], %1 : object, %S2
 //CHECK-NEXT:  %5 = ReturnInst %4
 //CHECK-NEXT:%BB1:
 //CHECK-NEXT:  %6 = ReturnInst undefined : undefined
@@ -40,12 +40,12 @@ print(foo2("param"));
 
 //CHECK-LABEL:function foo2(x)
 //CHECK-NEXT:%BB0:
-//CHECK-NEXT:  %0 = GetFunctionParentScopeInst %S0@global
-//CHECK-NEXT:  %1 = CreateScopeInst %0 : object, %S2{p:%S0@global, v:[x]}
-//CHECK-NEXT:  %2 = StoreVariableInst undefined : undefined, [x%S2], %1 : object, %S2
-//CHECK-NEXT:  %3 = StoreVariableInst %x, [x%S2], %1 : object, %S2
-//CHECK-NEXT:  %4 = StoreVariableInst "var" : string, [x%S2], %1 : object, %S2
-//CHECK-NEXT:  %5 = LoadVariableInst [x%S2], %1 : object, %S2
+//CHECK-NEXT:  %0 = GetFunctionParentScopeInst %S1@global
+//CHECK-NEXT:  %1 = CreateScopeInst %0 : object, %S3{p:%S1@global, v:[x]}
+//CHECK-NEXT:  %2 = StoreVariableInst undefined : undefined, [x%S3], %1 : object, %S3
+//CHECK-NEXT:  %3 = StoreVariableInst %x, [x%S3], %1 : object, %S3
+//CHECK-NEXT:  %4 = StoreVariableInst "var" : string, [x%S3], %1 : object, %S3
+//CHECK-NEXT:  %5 = LoadVariableInst [x%S3], %1 : object, %S3
 //CHECK-NEXT:  %6 = ReturnInst %5
 //CHECK-NEXT:%BB1:
 //CHECK-NEXT:  %7 = ReturnInst undefined : undefined

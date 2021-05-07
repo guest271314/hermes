@@ -69,7 +69,7 @@ Value *LReference::emitLoad() {
     case Kind::Member:
       return builder.createLoadPropertyInst(base_, property_);
     case Kind::VarOrGlobal:
-      return irgen_->emitLoad(base_);
+      return irgen_->emitLoad(resolved_);
     case Kind::Destructuring:
       assert(false && "destructuring cannot be loaded");
       return builder.getLiteralUndefined();
@@ -90,7 +90,7 @@ void LReference::emitStore(Value *value) {
       builder.createStorePropertyInst(value, base_, property_);
       return;
     case Kind::VarOrGlobal:
-      irgen_->emitStore(value, base_, declInit_);
+      irgen_->emitStore(value, resolved_, declInit_);
       return;
     case Kind::Error:
       return;
@@ -110,9 +110,7 @@ bool LReference::canStoreWithoutSideEffects() const {
 llvh::Optional<Identifier> LReference::getNameHint() const {
   if (kind_ != Kind::VarOrGlobal)
     return llvh::None;
-  return isa<ScopeVar>(base_)
-      ? cast<ScopeVar>(base_)->getName()
-      : cast<GlobalObjectProperty>(base_)->getName()->getValue();
+  return resolved_.getName();
 }
 
 //===----------------------------------------------------------------------===//
@@ -151,6 +149,8 @@ void ESTreeIRGen::doIt() {
   // The function which will "execute" the module.
   Function *topLevelFunction;
 
+  LexicalScopeRAII saveGlobalScope(this);
+
   // Function context used only when compiling in an existing lexical scope
   // chain. It is only initialized if we have a lexical scope chain.
   llvh::Optional<FunctionContext> wrapperFunctionContext{};
@@ -158,6 +158,11 @@ void ESTreeIRGen::doIt() {
   if (!lexicalScopeChain) {
     topLevelFunction = Builder.createTopLevelFunction(
         ESTree::isStrict(Program->strictness), Program->getSourceRange());
+
+    setNewScope(
+        topLevelFunction->createScopeDesc(nullptr, ScopeDesc::Kind::Global),
+        Builder.getGlobalObject());
+    bottomMostScopeDesc_ = currentIRScopeDesc_;
   } else {
     // If compiling in an existing lexical context, we need to install the
     // scopes in a wrapper function, which represents the "global" code.
@@ -168,6 +173,11 @@ void ESTreeIRGen::doIt() {
         ESTree::isStrict(Program->strictness),
         Program->getSourceRange(),
         true);
+
+    setNewScope(
+        wrapperFunction->createScopeDesc(nullptr, ScopeDesc::Kind::Global),
+        Builder.getGlobalObject());
+    bottomMostScopeDesc_ = currentIRScopeDesc_;
 
     // Initialize the wrapper context.
     wrapperFunctionContext.emplace(this, wrapperFunction, nullptr);
@@ -243,6 +253,26 @@ void ESTreeIRGen::doCJSModule(
   assert(Root && "no root in ESTreeIRGen");
   auto *func = cast<ESTree::FunctionExpressionNode>(Root);
   assert(func && "doCJSModule without a module");
+
+  LexicalScopeRAII saveGlobalScope(this);
+
+  // Find the global scope.
+  assert(topLevelFunction && "CJS module compiled without an entry function");
+  assert(
+      topLevelFunction->isGlobalScope() &&
+      "CJS module entry function is not global scope");
+  // Find the global scope.
+  ScopeDesc *globalScopeDesc = nullptr;
+  for (auto *scopeDesc : topLevelFunction->getScopes()) {
+    if (scopeDesc->isGlobalScope()) {
+      globalScopeDesc = scopeDesc;
+      break;
+    }
+  }
+  assert(globalScopeDesc && "CJS module compiled without a global scope");
+
+  setNewScope(globalScopeDesc, Builder.getGlobalObject());
+  bottomMostScopeDesc_ = globalScopeDesc;
 
   FunctionContext topLevelFunctionContext{this, topLevelFunction, semInfo};
   llvh::SaveAndRestore<FunctionContext *> saveTopLevelContext(
@@ -409,20 +439,23 @@ ScopeVar *ESTreeIRGen::newLocalVar(VarDecl::Kind declKind, Identifier name) {
   return var;
 }
 
-GlobalObjectProperty *ESTreeIRGen::declareAmbientGlobalProperty(
-    Identifier name) {
-  // Avoid redefining global properties.
-  auto *prop = dyn_cast_or_null<GlobalObjectProperty>(nameTable_.lookup(name));
-  if (prop)
-    return prop;
-
-  LLVM_DEBUG(
-      llvh::dbgs() << "declaring ambient global property " << name << " "
-                   << name.getUnderlyingPointer() << "\n");
-
-  prop = Builder.createGlobalObjectProperty(name, false);
+GlobalObjectProperty *ESTreeIRGen::declareNewAmbientProperty(Identifier name) {
+  assert(
+      !isObjectScoping() &&
+      "ambient properties should not be declared in object scoping mode");
+  auto *prop = Builder.createGlobalObjectProperty(name, false);
   topLevelContext->scopeRAII.bindGlobalProperty(name, prop);
   return prop;
+}
+
+void ESTreeIRGen::declareAmbientProperty(Identifier name) {
+  if (isObjectScoping())
+    return;
+
+  // Avoid redefining global properties.
+  if (nameTable_.lookup(name))
+    return;
+  declareNewAmbientProperty(name);
 }
 
 namespace {
@@ -481,32 +514,101 @@ void ESTreeIRGen::processDeclarationFile(ESTree::ProgramNode *programNode) {
 
   // Create variable declarations for each of the hoisted variables.
   for (auto vd : DH.decls)
-    declareAmbientGlobalProperty(getNameFieldFromID(vd->_id));
+    declareAmbientProperty(getNameFieldFromID(vd->_id));
   for (auto fd : DH.closures)
-    declareAmbientGlobalProperty(getNameFieldFromID(fd->_id));
+    declareAmbientProperty(getNameFieldFromID(fd->_id));
 }
 
-Value *ESTreeIRGen::resolveIdentifier(ESTree::IdentifierNode *id) {
-  Identifier name = getNameFieldFromID(id);
+ESTreeIRGen::FindScopeResult ESTreeIRGen::findClosestScope(
+    ScopeDesc *desiredDesc,
+    bool ignoreDynamic) const {
+  assert(desiredDesc && "desired scope descriptor cannot be null");
 
-  // Check if this is a known variable.
-  if (auto *var = nameTable_.lookup(name))
-    return var;
+  Value *startValue = currentIRScope_;
+  ScopeDesc *startDesc = currentIRScopeDesc_;
 
-  if (curFunction()->function->isStrictMode()) {
-    // Report a warning in strict mode.
-    auto currentFunc = Builder.getInsertionBlock()->getParent();
+  // Scan the parent scopes until we reach a dynamic scope, the desired scope,
+  // or a new function.
+  for (;;) {
+    if (!ignoreDynamic && startDesc->isDynamicObject())
+      return {startDesc, startValue, startDesc};
+    if (startDesc == desiredDesc)
+      return {nullptr, startValue, startDesc};
 
-    Builder.getModule()->getContext().getSourceErrorManager().warning(
-        Warning::UndefinedVariable,
-        id->getSourceRange(),
-        Twine("the variable \"") + name.str() + "\" was not declared in " +
-            currentFunc->getDescriptiveDefinitionKindStr() + " \"" +
-            currentFunc->getInternalNameStr() + "\"");
+    auto *parentDesc = startDesc->getParent();
+    // If the scope isn't available, we have to give up. Most likely
+    // because it is in a parent function.
+    auto it = curFunction()->availableScopes_.find(parentDesc);
+    if (it == curFunction()->availableScopes_.end())
+      break;
+    startValue = it->second;
+    startDesc = parentDesc;
   }
 
-  // Undeclared variable is an ambient global property.
-  return declareAmbientGlobalProperty(name);
+  if (ignoreDynamic)
+    return {nullptr, startValue, startDesc};
+
+  // We found the closest scope in the current function and saved it in
+  // startValue, startDesc. We did not encounter any dynamic scopes.
+  // Keep scanning until we reach a dynamic scope or the desired scope.
+  assert(!startDesc->isDynamicObject() && startDesc != desiredDesc);
+
+  ScopeDesc *curDesc = startDesc;
+  do {
+    curDesc = curDesc->getParent();
+    if (curDesc->isDynamicObject())
+      return {curDesc, startValue, startDesc};
+  } while (curDesc != desiredDesc);
+
+  return {nullptr, startValue, startDesc};
+}
+
+ResolvedIdentifier ESTreeIRGen::resolveIdentifier(ESTree::IdentifierNode *id) {
+  Identifier name = getNameFieldFromID(id);
+
+  LiteralString *strName;
+
+  // Is this potentially a known variable?
+  if (auto *var = nameTable_.lookup(name)) {
+    if (auto *SV = llvh::dyn_cast<ScopeVar>(var)) {
+      auto closest = findClosestScope(SV->getScope());
+      return {
+          closest.dynamic ? cast<Value>(Builder.getLiteralString(name))
+                          : cast<Value>(SV),
+          closest.value,
+          closest.desc};
+    }
+
+    strName = cast<GlobalObjectProperty>(var)->getName();
+  } else {
+    if (!isObjectScoping() && curFunction()->function->isStrictMode()) {
+      // Report a warning in strict mode.
+      auto currentFunc = Builder.getInsertionBlock()->getParent();
+
+      Builder.getModule()->getContext().getSourceErrorManager().warning(
+          Warning::UndefinedVariable,
+          id->getSourceRange(),
+          Twine("the variable \"") + name.str() + "\" was not declared in " +
+              currentFunc->getDescriptiveDefinitionKindStr() + " \"" +
+              currentFunc->getInternalNameStr() + "\"");
+
+      // Declare a new ambient property to prevent further warnings.
+      auto *prop = declareNewAmbientProperty(name);
+      strName = prop->getName();
+    } else {
+      strName = Builder.getLiteralString(name);
+    }
+  }
+
+  // This is not a known ScopeVar. Find the closest dynamic scope.
+  auto closest = findClosestScope(bottomMostScopeDesc_);
+  // Is the closest dynamic scope the global scope? If so, we should use it.
+  if (closest.dynamic == bottomMostScopeDesc_ &&
+      bottomMostScopeDesc_->isGlobalScope()) {
+    return {strName, Builder.getGlobalObject(), bottomMostScopeDesc_};
+  } else {
+    return {strName, closest.value, closest.desc};
+  }
 }
 
 Value *ESTreeIRGen::genMemberExpressionProperty(
@@ -554,8 +656,7 @@ LReference ESTreeIRGen::createLRef(ESTree::Node *node, bool declInit) {
 
   if (llvh::isa<ESTree::EmptyNode>(node)) {
     LLVM_DEBUG(dbgs() << "Creating an LRef for EmptyNode.\n");
-    return LReference(
-        LReference::Kind::Empty, this, false, nullptr, nullptr, sourceLoc);
+    return LReference(LReference::Empty(), this, sourceLoc);
   }
 
   /// Create lref for member expression (ex: o.f).
@@ -563,8 +664,7 @@ LReference ESTreeIRGen::createLRef(ESTree::Node *node, bool declInit) {
     LLVM_DEBUG(dbgs() << "Creating an LRef for member expression.\n");
     Value *obj = genExpression(ME->_object);
     Value *prop = genMemberExpressionProperty(ME);
-    return LReference(
-        LReference::Kind::Member, this, false, obj, prop, sourceLoc);
+    return LReference(LReference::Member(), this, obj, prop, sourceLoc);
   }
 
   /// Create lref for identifiers  (ex: a).
@@ -573,9 +673,9 @@ LReference ESTreeIRGen::createLRef(ESTree::Node *node, bool declInit) {
     LLVM_DEBUG(
         dbgs() << "Looking for identifier \"" << getNameFieldFromID(iden)
                << "\"\n");
-    auto *var = resolveIdentifier(iden);
+    auto var = resolveIdentifier(iden);
     return LReference(
-        LReference::Kind::VarOrGlobal, this, declInit, var, nullptr, sourceLoc);
+        LReference::VarOrGlobal(), this, declInit, var, sourceLoc);
   }
 
   /// Create lref for variable decls (ex: var a).
@@ -591,14 +691,13 @@ LReference ESTreeIRGen::createLRef(ESTree::Node *node, bool declInit) {
 
   // Destructuring assignment.
   if (auto *pat = llvh::dyn_cast<ESTree::PatternNode>(node)) {
-    return LReference(this, declInit, pat);
+    return LReference(LReference::Destructuring(), this, declInit, pat);
   }
 
   Builder.getModule()->getContext().getSourceErrorManager().error(
       node->getSourceRange(), "unsupported assignment target");
 
-  return LReference(
-      LReference::Kind::Error, this, false, nullptr, nullptr, sourceLoc);
+  return LReference(LReference::Error(), this, sourceLoc);
 }
 
 Value *ESTreeIRGen::genHermesInternalCall(
@@ -791,7 +890,7 @@ void ESTreeIRGen::emitDestructuringArray(
       // We don't need a try/catch, but last lref might. Just let the routine
       // do the right thing.
       storePreviousValue();
-      lref = createLRef(target, declInit);
+      lref.emplace(createLRef(target, declInit));
     } else {
       // We need a try/catch, but last lref might not. If it doesn't, emit it
       // directly and clear it, so we won't do anything inside our try/catch.
@@ -823,7 +922,7 @@ void ESTreeIRGen::emitDestructuringArray(
     //   if (value !== undefined) goto storeBlock    [if initializer present]
     //   value = initializer                         [if initializer present]
     // storeBlock:
-    //   lref.emitStore(value)
+    //   lref.emitStaticStore(value)
 
     auto *notDoneBlock = Builder.createBasicBlock(Builder.getFunction());
     auto *newValueBlock = Builder.createBasicBlock(Builder.getFunction());
@@ -1172,51 +1271,112 @@ Value *ESTreeIRGen::emitOptionalInitialization(
       {value, defaultValue}, {currentBlock, defaultResultBlock});
 }
 
-void ESTreeIRGen::emitNewScope() {
+void ESTreeIRGen::emitNewScope(bool dynamicObjectScope, Value *withValue) {
   Value *parentScope;
 
-  if (!currentIRScope_) {
-    parentScope = nullptr;
-  } else if (currentIRScopeDesc_->getFunction() != curFunction()->function) {
+  assert(currentIRScopeDesc_ && "currentIRScopeDesc_ can't be null");
+
+  if (currentIRScopeDesc_->getFunction() != curFunction()->function) {
     // If the parent is in a different function, we need to obtain it.
     parentScope = Builder.createGetFunctionParentScopeInst(currentIRScopeDesc_);
+    curFunction()->addAvailableScope(currentIRScopeDesc_, parentScope);
   } else {
     parentScope = currentIRScope_;
   }
 
-  currentIRScopeDesc_ =
-      curFunction()->function->createScopeDesc(currentIRScopeDesc_);
-  currentIRScope_ =
-      Builder.createCreateScopeInst(parentScope, currentIRScopeDesc_);
+  ScopeDesc::Kind scopeKind;
+  if (dynamicObjectScope) {
+    scopeKind = withValue ? ScopeDesc::Kind::With : ScopeDesc::Kind::Eval;
+  } else if (isObjectScoping()) {
+    scopeKind = ScopeDesc::Kind::StaticObject;
+  } else {
+    scopeKind = ScopeDesc::Kind::Env;
+  }
+
+  ScopeDesc *newDesc =
+      curFunction()->function->createScopeDesc(currentIRScopeDesc_, scopeKind);
+
+  Value *newIR;
+  if (scopeKind == ScopeDesc::Kind::With) {
+    newIR = Builder.createCreateDynamicObjectScopeInst(
+        parentScope, newDesc, withValue);
+  } else {
+    newIR = Builder.createCreateScopeInst(parentScope, newDesc);
+  }
+
+  setNewScope(newDesc, newIR);
+  curFunction()->addAvailableScope(newDesc, newIR);
 }
 
-Instruction *ESTreeIRGen::emitLoad(Value *from, bool inhibitThrow) {
-  if (auto *SV = llvh::dyn_cast<ScopeVar>(from)) {
+Instruction *ESTreeIRGen::emitLoad(
+    const ResolvedIdentifier &from,
+    bool inhibitThrow) {
+  if (from.isScopeVar()) {
+    ScopeVar *SV = from.getScopeVar();
     Instruction *res;
     res = Builder.createLoadVariableInst(
-        SV, currentIRScope_, currentIRScopeDesc_);
+        SV, from.closestScopeValue, from.closestScopeDesc);
     if (SV->getObeysTDZ())
       res = Builder.createThrowIfEmptyInst(res);
     return res;
-  } else if (auto *globalProp = llvh::dyn_cast<GlobalObjectProperty>(from)) {
-    if (globalProp->isDeclared() || inhibitThrow)
-      return Builder.createLoadPropertyInst(
-          Builder.getGlobalObject(), globalProp->getName());
-    else
-      return Builder.createTryLoadGlobalPropertyInst(globalProp);
-  } else {
-    llvm_unreachable("invalid value to load from");
   }
+
+  LiteralString *LS = from.getDynamic();
+
+  // If loading from the global scope, use a property instruction.
+  if (from.isGlobalProperty()) {
+    if (inhibitThrow)
+      return Builder.createLoadPropertyInst(Builder.getGlobalObject(), LS);
+    else
+      return Builder.createTryLoadGlobalPropertyInst(LS);
+  }
+
+  // Dynamic load.
+  return Builder.createLoadDynamicInst(
+      !inhibitThrow, LS, from.closestScopeValue, from.closestScopeDesc);
 }
 
-void ESTreeIRGen::emitStore(Value *storedValue, Value *ptr, bool declInit) {
-  if (auto *SV = llvh::dyn_cast<ScopeVar>(ptr)) {
-    if (!declInit && SV->getObeysTDZ()) {
+Instruction *ESTreeIRGen::emitStaticLoad(Value *from, bool inhibitThrow) {
+  if (isa<ScopeVar>(from)) {
+    auto *SV = cast<ScopeVar>(from);
+    auto closest = findClosestScope(SV->getScope(), true);
+    return emitLoad(
+        ResolvedIdentifier(SV, closest.value, closest.desc), inhibitThrow);
+  }
+
+  auto *LS = cast<GlobalObjectProperty>(from)->getName();
+  if (inhibitThrow)
+    return Builder.createLoadPropertyInst(Builder.getGlobalObject(), LS);
+  else
+    return Builder.createTryLoadGlobalPropertyInst(LS);
+}
+
+void ESTreeIRGen::emitStore(
+    Value *storedValue,
+    const ResolvedIdentifier &ptr,
+    bool declInit) {
+  if (ptr.isScopeVar()) {
+    ScopeVar *SV = ptr.getScopeVar();
+    if (declInit) {
+      Builder.createStoreVariableInst(
+          storedValue, SV, ptr.closestScopeValue, ptr.closestScopeDesc);
+      // If a const is initialized. mark it as read-only.
+      if (SV->isReadOnly() && isObjectScoping()) {
+        Builder.createReadOnlyVariableInst(
+            SV->getDeclKind() == ScopeVar::DeclKind::ConstLet,
+            SV,
+            ptr.closestScopeValue,
+            ptr.closestScopeDesc);
+      }
+      return;
+    }
+
+    if (SV->getObeysTDZ()) {
       // Must verify whether the variable is initialized.
       Builder.createThrowIfEmptyInst(Builder.createLoadVariableInst(
-          SV, currentIRScope_, currentIRScopeDesc_));
+          SV, ptr.closestScopeValue, ptr.closestScopeDesc));
     }
-    if (!declInit && SV->isReadOnly()) {
+    if (SV->isReadOnly()) {
       if (Builder.getFunction()->isStrictMode() ||
           SV->getDeclKind() == ScopeVar::DeclKind::ConstLet) {
         emitRuntimeError(
@@ -1225,16 +1385,49 @@ void ESTreeIRGen::emitStore(Value *storedValue, Value *ptr, bool declInit) {
       return;
     }
     Builder.createStoreVariableInst(
-        storedValue, SV, currentIRScope_, currentIRScopeDesc_);
-  } else if (auto *globalProp = llvh::dyn_cast<GlobalObjectProperty>(ptr)) {
-    if (globalProp->isDeclared() || !Builder.getFunction()->isStrictMode()) {
+        storedValue, SV, ptr.closestScopeValue, ptr.closestScopeDesc);
+    return;
+  }
+
+  LiteralString *LS = ptr.getDynamic();
+
+  // If storing to the global scope, use a property instruction.
+  if (ptr.isGlobalProperty()) {
+    if (!Builder.getFunction()->isStrictMode()) {
       Builder.createStorePropertyInst(
-          storedValue, Builder.getGlobalObject(), globalProp->getName());
+          storedValue, Builder.getGlobalObject(), LS);
     } else {
-      Builder.createTryStoreGlobalPropertyInst(storedValue, globalProp);
+      Builder.createTryStoreGlobalPropertyInst(storedValue, LS);
     }
+    return;
+  }
+
+  Builder.createStoreDynamicInst(
+      Builder.getFunction()->isStrictMode(),
+      storedValue,
+      LS,
+      ptr.closestScopeValue,
+      ptr.closestScopeDesc);
+}
+
+void ESTreeIRGen::emitStaticStore(
+    Value *storedValue,
+    Value *ptr,
+    bool declInit) {
+  if (isa<ScopeVar>(ptr)) {
+    auto *SV = cast<ScopeVar>(ptr);
+    auto closest = findClosestScope(SV->getScope(), true);
+    return emitStore(
+        storedValue,
+        ResolvedIdentifier(SV, closest.value, closest.desc),
+        declInit);
+  }
+
+  auto *LS = cast<GlobalObjectProperty>(ptr)->getName();
+  if (!Builder.getFunction()->isStrictMode()) {
+    Builder.createStorePropertyInst(storedValue, Builder.getGlobalObject(), LS);
   } else {
-    llvm_unreachable("invalid value to load from");
+    Builder.createTryStoreGlobalPropertyInst(storedValue, LS);
   }
 }
 
@@ -1346,7 +1539,7 @@ static std::pair<Function *, ScopeDesc *> createDummyLexicalParents(
   auto *block = builder.createBasicBlock(ourFunc);
   builder.setInsertionBlock(block);
   builder.createUnreachableInst();
-  ourDesc = global->createScopeDesc(parentDesc);
+  ourDesc = global->createScopeDesc(parentDesc, ScopeDesc::Kind::Env);
   auto *scopeVal = builder.createCreateScopeInst(nullptr, ourDesc);
   auto *inst = builder.createCreateFunctionInst(childFunc, scopeVal, ourDesc);
   builder.createReturnInst(inst);

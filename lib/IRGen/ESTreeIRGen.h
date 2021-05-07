@@ -149,6 +149,9 @@ class FunctionContext {
   /// when arrow functions need to access it.
   ScopeVar *capturedArguments{};
 
+  /// The scopes available in the function at any moment.
+  llvh::DenseMap<ScopeDesc *, Value *> availableScopes_{};
+
   /// Initialize a new function context, while preserving the previous one.
   /// \param irGen the associated ESTreeIRGen object.
   /// \param function the newly created Function IR node.
@@ -199,6 +202,14 @@ class FunctionContext {
         "accessing an uninitialized label");
     return label;
   }
+
+  /// Record a scope as available so its value can be used directly instead
+  /// of getting the parents starting from the current one.
+  /// Scopes are guaranteed to be created in a structured manner.
+  void addAvailableScope(ScopeDesc *desc, Value *value);
+
+  /// Remove a scope from the set of available scopes.
+  void removeAvailableScope(ScopeDesc *desc);
 };
 
 enum class ControlFlowChange { Break, Continue };
@@ -248,6 +259,58 @@ class SurroundingTry {
   }
 };
 
+/// This struct encapsulates the result of resolving an identifier - looking
+/// it up in the available scopes and finding the apropriate binding.
+/// It could be resolved statically - if it is a member of a surrounding
+/// static scope, or dynamically - if there is a surrounding dynamic scope
+/// or it is in the global scope.
+struct ResolvedIdentifier {
+  /// The resolved identifier. It is either an instance of ScopeVar, which
+  /// can be accessed normally, or a LiteralString, which must be accessed
+  /// dynamically.
+  Value *resolved;
+  /// The value of the closest scope that was found.
+  Value *closestScopeValue;
+  /// The descriptor of the closest scope that should be used to get to the
+  /// resolved binding.
+  ScopeDesc *closestScopeDesc;
+
+  ResolvedIdentifier(
+      Value *resolved,
+      Value *closestScopeValue,
+      ScopeDesc *closestScopeDesc)
+      : resolved(resolved),
+        closestScopeValue(closestScopeValue),
+        closestScopeDesc(closestScopeDesc) {
+    assert(isa<ScopeVar>(resolved) || isa<LiteralString>(resolved));
+  }
+
+  bool isGlobalProperty() const {
+    assert(
+        (!closestScopeDesc->isGlobalScope() || isa<LiteralString>(resolved)) &&
+        "global scope can only contain resolved properties");
+    return closestScopeDesc->isGlobalScope();
+  }
+
+  bool isScopeVar() const {
+    return isa<ScopeVar>(resolved);
+  }
+  bool isDynamic() const {
+    return isa<LiteralString>(resolved);
+  }
+
+  LiteralString *getDynamic() const {
+    return cast<LiteralString>(resolved);
+  }
+  ScopeVar *getScopeVar() const {
+    return cast<ScopeVar>(resolved);
+  }
+
+  Identifier getName() const {
+    return isScopeVar() ? getScopeVar()->getName() : getDynamic()->getValue();
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // LReference
 
@@ -268,23 +331,47 @@ class LReference {
     Destructuring,
   };
 
+  using Empty = std::integral_constant<Kind, Kind::Empty>;
+  using Member = std::integral_constant<Kind, Kind::Member>;
+  using VarOrGlobal = std::integral_constant<Kind, Kind::VarOrGlobal>;
+  using Destructuring = std::integral_constant<Kind, Kind::Destructuring>;
+  using Error = std::integral_constant<Kind, Kind::Error>;
+
+  LReference(Empty k, ESTreeIRGen *irgen, SMLoc loadLoc)
+      : kind_(k.value), irgen_(irgen), declInit_(false), loadLoc_(loadLoc) {}
+
   LReference(
-      Kind kind,
+      Member k,
       ESTreeIRGen *irgen,
-      bool declInit,
       Value *base,
       Value *property,
       SMLoc loadLoc)
-      : kind_(kind), irgen_(irgen), declInit_(declInit) {
+      : kind_(k.value), irgen_(irgen), declInit_(false), loadLoc_(loadLoc) {
     base_ = base;
     property_ = property;
-    loadLoc_ = loadLoc;
   }
 
-  LReference(ESTreeIRGen *irgen, bool declInit, ESTree::PatternNode *target)
-      : kind_(Kind::Destructuring), irgen_(irgen), declInit_(declInit) {
+  LReference(
+      VarOrGlobal k,
+      ESTreeIRGen *irgen,
+      bool declInit,
+      const ResolvedIdentifier &resolved,
+      SMLoc loadLoc)
+      : kind_(k.value), irgen_(irgen), declInit_(declInit), loadLoc_(loadLoc) {
+    new (&resolved_) ResolvedIdentifier(resolved);
+  }
+
+  LReference(
+      Destructuring k,
+      ESTreeIRGen *irgen,
+      bool declInit,
+      ESTree::PatternNode *target)
+      : kind_(k.value), irgen_(irgen), declInit_(declInit) {
     destructuringTarget_ = target;
   }
+
+  LReference(Error k, ESTreeIRGen *irgen, SMLoc loadLoc)
+      : kind_(k.value), irgen_(irgen), declInit_(false), loadLoc_(loadLoc) {}
 
   bool isEmpty() const {
     return kind_ == Kind::Empty;
@@ -293,7 +380,8 @@ class LReference {
   Value *emitLoad();
   void emitStore(Value *value);
 
-  /// \return true if it is known that \c emitStore() will not have any side
+  /// \return true if it is known that \c emitStaticStore() will not have any
+  /// side
   ///   effects, including exceptions. This is not a sophisticated analysis,
   ///   it only checks for a local variable.
   bool canStoreWithoutSideEffects() const;
@@ -313,6 +401,10 @@ class LReference {
   /// when storing.
   bool declInit_;
 
+  /// Debug position for loads. Must be outside of the union because it has a
+  /// constructor.
+  SMLoc loadLoc_;
+
   union {
     struct {
       /// The base of the object, or the variable we load from.
@@ -324,11 +416,10 @@ class LReference {
 
     /// Destructuring assignment target.
     ESTree::PatternNode *destructuringTarget_;
-  };
 
-  /// Debug position for loads. Must be outside of the union because it has a
-  /// constructor.
-  SMLoc loadLoc_;
+    /// Resolved identifier.
+    ResolvedIdentifier resolved_;
+  };
 
   /// \return a reference to IRGen's builder.
   IRBuilder &getBuilder();
@@ -368,6 +459,9 @@ class ESTreeIRGen {
   ScopeDesc *currentIRScopeDesc_ = nullptr;
   /// The current scope value available to the IR.
   Value *currentIRScope_ = nullptr;
+  /// The bottom-most scope of this compilation. It is set the first time a
+  /// scope is created.
+  ScopeDesc *bottomMostScopeDesc_ = nullptr;
 
   /// Lexical scope chain from the runtime, used to resolve identifiers in local
   /// eval.
@@ -392,6 +486,11 @@ class ESTreeIRGen {
   /// hint appears in the name.
   Identifier genAnonymousLabelName(Identifier hint) {
     return genAnonymousLabelName(hint.isValid() ? hint.str() : "anonymous");
+  }
+
+  /// \return true if object scoping is enabled.
+  bool isObjectScoping() const {
+    return Mod->getContext().isObjectScoping();
   }
 
  public:
@@ -447,6 +546,7 @@ class ESTreeIRGen {
 
   void genIfStatement(ESTree::IfStatementNode *IfStmt);
   void genReturnStatement(ESTree::ReturnStatementNode *RetStmt);
+  void genWithStatement(ESTree::WithStatementNode *WithStmt);
   void genForInStatement(ESTree::ForInStatementNode *ForInStmt);
   void genForOfStatement(ESTree::ForOfStatementNode *forOfStmt);
 
@@ -829,6 +929,10 @@ class ESTreeIRGen {
     assert(functionContext_ && "No active function context");
     return functionContext_;
   }
+  inline const FunctionContext *curFunction() const {
+    assert(functionContext_ && "No active function context");
+    return functionContext_;
+  }
 
   /// Declare a variable or a global property depending on whether \p inFunc
   /// is the global scope. Do nothing if the variable or property is already
@@ -845,17 +949,54 @@ class ESTreeIRGen {
   /// regardless of any other setting.
   ScopeVar *newLocalVar(VarDecl::Kind declKind, Identifier name);
 
-  /// Declare a new ambient global property, if not already declared.
-  GlobalObjectProperty *declareAmbientGlobalProperty(Identifier name);
+  /// Declare a new ambient global property. It must not exist.
+  GlobalObjectProperty *declareNewAmbientProperty(Identifier name);
+
+  /// Declare a new ambient global property, if not already declared. Does
+  /// nothing in object scoping mode.
+  void declareAmbientProperty(Identifier name);
 
   /// Scan all the global declarations in the supplied declaration file and
   /// declare them as global properties.
   void processDeclarationFile(ESTree::ProgramNode *programNode);
 
+  /// The result of \c findClosestScope().
+  class FindScopeResult {
+   public:
+    /// Set to the first dynamic scope between the current scope and the desired
+    /// scope.
+    ScopeDesc *dynamic;
+    /// The value of the closest scope that was found.
+    Value *value;
+    /// The descriptor of the closest scope.
+    ScopeDesc *desc;
+
+    FindScopeResult(ScopeDesc *dynamic, Value *value, ScopeDesc *desc)
+        : dynamic(dynamic), value(value), desc(desc) {}
+  };
+
+  /// Starting from the current scope, look for an available scope (in the
+  /// current function) which is closest to the desired scope. The search stops
+  /// at the first dynamic scope, since it is unknown what variables it
+  /// contains.
+  /// Additionally, the first dynamic scope between the starting scope and the
+  /// desired scope is returned. This flag indicates that a dynamic Load/Store
+  /// must be used and also to know precisely why.
+  ///
+  /// \param desiredDesc is the scope that we are trying to find.
+  /// \param ignoreDynamic whether to ignore the dynamic scopes and just
+  ///     look for the closest available.
+  /// \return the first dynamic scope found, the value and desc of the available
+  ///     scope closest to desiredDesc in the current function.
+  ///     If no other scope is available, the starting scope will be returned.
+  FindScopeResult findClosestScope(
+      ScopeDesc *desiredDesc,
+      bool ignoreDynamic = false) const;
+
   /// Lookup the identifier \p name. If it is not defined, (optionally) report a
   /// warning, define an ambient global property (to avoid further warnings) and
   /// return it.
-  Value *resolveIdentifier(ESTree::IdentifierNode *id);
+  ResolvedIdentifier resolveIdentifier(ESTree::IdentifierNode *id);
 
   /// Generate the IR for the property field of the MemberExpressionNode.
   /// The property field may be a string literal or some computed expression.
@@ -1043,25 +1184,58 @@ class ESTreeIRGen {
       ESTree::Node *init,
       Identifier nameHint);
 
+  /// A centralized method for setting the current scope.
+  void setNewScope(ScopeDesc *newScopeDesc, Value *newScope) {
+    currentIRScopeDesc_ = newScopeDesc;
+    currentIRScope_ = newScope;
+  }
+
   /// Create a new scope using the current scope as a parent and set the new
-  /// scope as current.
-  void emitNewScope();
+  /// scope as current. The kind of the new scope is determined based in the
+  /// parameters.
+  ///
+  /// \param dynamicObjectScope if true, the new scope will be a dynamic object
+  ///     scope for "with" or "eval".
+  /// \param withValue only valid if \c dynamicObjectScope is true. If null,
+  ///     an "eval" scope is created, otherwise a "with" scope is created.
+  void emitNewScope(
+      bool dynamicObjectScope = false,
+      Value *withValue = nullptr);
 
   /// Emit an instruction to load a value from a specified location.
   /// \param from location to load from, either a Variable or
-  /// GlobalObjectProperty. \param inhibitThrow  if true, do not throw when
-  /// loading from mmissing global properties. \return the instruction
-  /// performing the load.
-  Instruction *emitLoad(Value *from, bool inhibitThrow = false);
+  ///     GlobalObjectProperty.
+  /// \param inhibitThrow  if true, do not throw when loading from missing
+  ///     global properties.
+  /// \return the instruction performing the load.
+  Instruction *emitStaticLoad(Value *from, bool inhibitThrow = false);
+
+  /// Emit an instruction to load a value from a specified location.
+  /// \param from location to load from, either a Variable or
+  ///     GlobalObjectProperty.
+  /// \param inhibitThrow  if true, do not throw when loading from missing
+  ///     global properties.
+  /// \return the instruction performing the load.
+  Instruction *emitLoad(
+      const ResolvedIdentifier &from,
+      bool inhibitThrow = false);
 
   /// Emit an instruction to a store a value into the specified location.
   /// \param storedValue value to store
-  /// \param ptr location to store into, either a Variable or
+  /// \param ptr location to store into, either a ScopeVar or
   ///     GlobalObjectProperty.
   /// \param declInit whether this is a declaration initializer, so the TDZ
-  /// check
-  ///     should be skipped.
-  void emitStore(Value *storedValue, Value *ptr, bool declInit);
+  ///     check should be skipped.
+  void emitStaticStore(Value *storedValue, Value *ptr, bool declInit);
+
+  /// Emit an instruction to a store a value into the specified location.
+  /// \param storedValue value to store
+  /// \param ptr location to store into, either a ScopeVar or
+  ///     GlobalObjectProperty.
+  /// \param declInit whether this is a declaration initializer, so the TDZ
+  ///     check should be skipped.
+  void
+  emitStore(Value *storedValue, const ResolvedIdentifier &ptr, bool declInit);
 
   /// Emit code to raise a runtime error of the specified type and with the
   /// specified message.

@@ -415,6 +415,17 @@ class IRBuilder {
       Value *startScope,
       ScopeDesc *startScopeDesc,
       ScopeDesc *desiredScopeDesc);
+  CreateStaticObjectScopeInst *createCreateStaticObjectScopeInst(
+      Value *parentScope,
+      ScopeDesc *scopeDesc);
+  CreateDynamicObjectScopeInst *createCreateDynamicObjectScopeInst(
+      Value *parentScope,
+      ScopeDesc *scopeDesc,
+      Value *withValue);
+  GetObjectScopeParentInst *createGetObjectScopeParentInst(
+      Value *startScope,
+      ScopeDesc *startScopeDesc,
+      ScopeDesc *desiredScopeDesc);
 
   LoadVariableInst *createLoadVariableInst(
       ScopeVar *var,
@@ -424,6 +435,25 @@ class IRBuilder {
   StoreVariableInst *createStoreVariableInst(
       Value *value,
       ScopeVar *targetVar,
+      Value *startScope,
+      ScopeDesc *startScopeDesc);
+
+  ReadOnlyVariableInst *createReadOnlyVariableInst(
+      bool throwOnWrite,
+      ScopeVar *var,
+      Value *startScope,
+      ScopeDesc *startScopeDesc);
+
+  LoadDynamicInst *createLoadDynamicInst(
+      bool mustExist,
+      LiteralString *varName,
+      Value *startScope,
+      ScopeDesc *startScopeDesc);
+
+  StoreDynamicInst *createStoreDynamicInst(
+      bool strict,
+      Value *value,
+      LiteralString *varName,
       Value *startScope,
       ScopeDesc *startScopeDesc);
 

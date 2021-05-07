@@ -34,6 +34,8 @@ struct CodeGenerationSettings {
   bool dumpUseList{false};
   /// Dump IR after every pass.
   bool dumpIRBetweenPasses{false};
+  /// Dump the types of operands.
+  bool dumpIRTypes{true};
   /// Instrument IR for dynamic checking (if support is compiled in).
   bool instrumentIR{false};
 };
@@ -139,6 +141,9 @@ class Context {
   /// If true, every function will be compiled lazily when invoked for the
   /// first time.
   // bool lazyCompilation_{false};
+
+  /// If true, we use objects and dynamic scoping.
+  bool objectScoping_{false};
 
   /// Even if lazily compiling, eagerly compile any functions under this size in
   /// bytes.
@@ -319,6 +324,13 @@ class Context {
   void setLazyCompilation(bool lazyCompilation) {
     // FIXME: TEMPORARILY DISABLED
     // lazyCompilation_ = lazyCompilation;
+  }
+
+  bool isObjectScoping() const {
+    return objectScoping_;
+  }
+  void setObjectScoping(bool objectScoping) {
+    objectScoping_ = objectScoping;
   }
 
   unsigned getPreemptiveFunctionCompilationThreshold() {

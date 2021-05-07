@@ -30,6 +30,13 @@ bool isIdOperand(Instruction *I, unsigned idx) {
     CASE_WITH_PROP_IDX(TryLoadGlobalPropertyInst);
     CASE_WITH_PROP_IDX(TryStoreGlobalPropertyInst);
 
+    case ValueKind::LoadDynamicInstKind:
+      return idx == LoadDynamicInst::VarNameIdx;
+    case ValueKind::StoreDynamicInstKind:
+      return idx == StoreDynamicInst::VarNameIdx;
+    case ValueKind::ReadOnlyVariableInstKind:
+      return idx == ReadOnlyVariableInst::VarIdx;
+
     case ValueKind::HBCAllocObjectFromBufferInstKind:
       // AllocObjectFromBuffer stores the keys and values as alternating
       // operands starting from FirstKeyIdx.

@@ -188,6 +188,10 @@ void ESTreeIRGen::genStatement(ESTree::Node *stmt) {
     return;
   }
 
+  if (llvh::isa<ESTree::WithStatementNode>(stmt)) {
+    return genWithStatement(llvh::cast<ESTree::WithStatementNode>(stmt));
+  }
+
   if (auto *importDecl = llvh::dyn_cast<ESTree::ImportDeclarationNode>(stmt)) {
     return genImportDeclaration(importDecl);
   }
@@ -551,6 +555,19 @@ void ESTreeIRGen::genReturnStatement(ESTree::ReturnStatementNode *RetStmt) {
   Builder.setInsertionBlock(Builder.createBasicBlock(Parent));
 }
 
+void ESTreeIRGen::genWithStatement(ESTree::WithStatementNode *WithStmt) {
+  if (!isObjectScoping()) {
+    Builder.getModule()->getContext().getSourceErrorManager().error(
+        WithStmt->getStartLoc(), "object scoping must be enabled for 'with'");
+    return;
+  }
+
+  Value *object = genExpression(WithStmt->_object);
+  LexicalScopeRAII saveScope(this);
+  emitNewScope(true, object);
+  genStatement(WithStmt->_body);
+}
+
 /// \returns true if \p node is the default case.
 static inline bool isDefaultCase(ESTree::SwitchCaseNode *caseStmt) {
   // If there is no test field then this is the default block.
@@ -734,7 +751,7 @@ void ESTreeIRGen::genImportDeclaration(
       // import defaultProperty from 'file.js';
       auto *local = nameTable_.lookup(getNameFieldFromID(ids->_local));
       assert(local && "imported name should have been hoisted");
-      emitStore(
+      emitStaticStore(
           Builder.createLoadPropertyInst(exports, identDefaultExport_),
           local,
           true);
@@ -744,7 +761,7 @@ void ESTreeIRGen::genImportDeclaration(
       // import * as File from 'file.js';
       auto *local = nameTable_.lookup(getNameFieldFromID(ins->_local));
       assert(local && "imported name should have been hoisted");
-      emitStore(exports, local, true);
+      emitStaticStore(exports, local, true);
     } else {
       // import {x as y} as File from 'file.js';
       // import {x} as File from 'file.js';
@@ -756,7 +773,7 @@ void ESTreeIRGen::genImportDeclaration(
 
       // Get is->_imported from the exports object, because that's what the
       // other file stored it as.
-      emitStore(
+      emitStaticStore(
           Builder.createLoadPropertyInst(
               exports, getNameFieldFromID(is->_imported)),
           local,
@@ -800,7 +817,7 @@ void ESTreeIRGen::genExportNamedDeclaration(
         Identifier name = getNameFieldFromID(variableDeclarator->_id);
 
         Builder.createStorePropertyInst(
-            emitLoad(nameTable_.lookup(name)), exports, name);
+            emitStaticLoad(nameTable_.lookup(name)), exports, name);
       }
     } else if (
         auto *classDecl = llvh::dyn_cast<ESTree::ClassDeclarationNode>(decl)) {
@@ -813,7 +830,7 @@ void ESTreeIRGen::genExportNamedDeclaration(
       auto *funDecl = llvh::dyn_cast<ESTree::FunctionDeclarationNode>(decl);
       // export function x() {}
       Identifier name = getNameFieldFromID(funDecl->_id);
-      auto *fun = emitLoad(nameTable_.lookup(name));
+      auto *fun = emitStaticLoad(nameTable_.lookup(name));
       Builder.createStorePropertyInst(fun, exports, name);
     }
 
@@ -857,7 +874,7 @@ void ESTreeIRGen::genExportDefaultDeclaration(
     // The function declaration should have been hoisted,
     // so simply load it and store it in the default slot.
     Identifier name = getNameFieldFromID(funDecl->_id);
-    auto *fun = emitLoad(nameTable_.lookup(name));
+    auto *fun = emitStaticLoad(nameTable_.lookup(name));
     Builder.createStorePropertyInst(fun, exports, name);
   } else if (
       auto *classDecl = llvh::dyn_cast<ESTree::ClassDeclarationNode>(decl)) {
