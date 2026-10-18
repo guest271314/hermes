@@ -53,6 +53,7 @@ jobs:
         brew install cmake ninja icu4c
         pip3 install pyyaml pygments --break-system-packages || pip3 install pyyaml pygments
         echo "ICU_ROOT=$(brew --prefix icu4c)" >> "$GITHUB_ENV"
+        echo "PKG_CONFIG_PATH=$(brew --prefix icu4c)/lib/pkgconfig" >> "$GITHUB_ENV"
 
     - name: Setup WASI SDK
       run: |
@@ -66,12 +67,21 @@ jobs:
     - name: Configure Host Tools (Linux)
       if: runner.os == 'Linux'
       run: |
-        cmake -G Ninja -S . -B build-host -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+        cmake -G Ninja -S . -B build-host \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_C_COMPILER=clang \
+          -DCMAKE_CXX_COMPILER=clang++
 
     - name: Configure Host Tools (macOS)
       if: runner.os == 'macOS'
       run: |
-        cmake -G Ninja -S . -B build-host -DCMAKE_BUILD_TYPE=Release -DICU_ROOT="$ICU_ROOT" -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+        cmake -G Ninja -S . -B build-host \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_C_COMPILER=clang \
+          -DCMAKE_CXX_COMPILER=clang++ \
+          -DICU_ROOT="$ICU_ROOT" \
+          -DCMAKE_PREFIX_PATH="$ICU_ROOT" \
+          -DPython3_EXECUTABLE="$(which python3)"
 
     - name: Compile Host Tools
       run: |
@@ -96,13 +106,27 @@ jobs:
     - name: Bundle SDK
       run: |
         mkdir -p "$SDK_DIR/bin" "$SDK_DIR/lib" "$SDK_DIR/include" "$SDK_DIR/obj"
-        cp build-host/bin/shermes "$SDK_DIR/bin/"
-        cp build-wasm/lib/libshermes_console_a.a "$SDK_DIR/lib/"
-        cp build-wasm/lib/libhermesvmlean_a.a "$SDK_DIR/lib/"
-        cp build-wasm/jsi/libjsi.a "$SDK_DIR/lib/"
-        cp build-wasm/tools/sh-demo/CMakeFiles/sh-demo.dir/cxa.cpp.obj "$SDK_DIR/obj/"
-        cp build-wasm/lib/config/libhermesvm-config.h "$SDK_DIR/include/"
+
+        # Copy a file found anywhere under a build dir; fail clearly if missing
+        grab() {  # grab <build-dir> <filename> <dest-dir>
+          f=$(find "$1" -name "$2" -type f | head -n 1)
+          if [ -z "$f" ]; then
+            echo "ERROR: $2 not found under $1"
+            find "$1" -name "*.a" | head -50
+            exit 1
+          fi
+          echo "Found $f"
+          cp "$f" "$3/"
+        }
+
+        grab build-host shermes "$SDK_DIR/bin"
+        grab build-wasm libshermes_console_a.a "$SDK_DIR/lib"
+        grab build-wasm libhermesvmlean_a.a "$SDK_DIR/lib"
+        grab build-wasm libjsi.a "$SDK_DIR/lib"
+        grab build-wasm cxa.cpp.obj "$SDK_DIR/obj"
+        grab build-wasm libhermesvm-config.h "$SDK_DIR/include"
         cp -r include/hermes "$SDK_DIR/include/"
+
         cat > "$SDK_DIR/README.txt" <<'EOF'
         Static Hermes WebAssembly SDK
         =============================
@@ -118,7 +142,7 @@ jobs:
         3. Link the object code into a standalone .wasm executable:
            $WasiSdk/bin/clang++ -O3 nm_shermes.o ./obj/cxa.cpp.obj -o nm_shermes.wasm -L./lib -lshermes_console_a -lhermesvmlean_a -ljsi -lwasi-emulated-mman -lsetjmp
         EOF
-        sed -i.bak 's/^        //' "$SDK_DIR/README.txt" && rm "$SDK_DIR/README.txt.bak"
+
         if [ "$RUNNER_OS" = "Linux" ]; then
           zip -r "$SDK_DIR.zip" "$SDK_DIR/"
         else
@@ -133,3 +157,11 @@ jobs:
           ${{ env.SDK_DIR }}.zip
           ${{ env.SDK_DIR }}.tar.gz
         if-no-files-found: error
+
+    - name: Show CMake logs on failure
+      if: failure()
+      run: |
+        for f in build-host/CMakeFiles/CMakeError.log build-wasm/CMakeFiles/CMakeError.log; do
+          [ -f "$f" ] && { echo "===== $f ====="; tail -n 80 "$f"; }
+        done
+        true
