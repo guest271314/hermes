@@ -27,7 +27,7 @@ jobs:
       WASI_SDK_TAG: "wasi-sdk-25"
       WASI_SDK_VERSION: "25.0"
       WASI_SDK_PATH: ${{ github.workspace }}/wasi-sdk
-      SDK_DIR: hermes-wasm-sdk-${{ matrix.os-name }}
+      SDK_DIR: shermes-wasm-sdk-${{ matrix.os-name }}
 
     defaults:
       run:
