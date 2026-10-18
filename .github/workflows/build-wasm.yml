@@ -54,35 +54,41 @@ jobs:
       if: matrix.os == 'ubuntu-24.04'
       run: |
         mkdir -p "${{ env.WASI_SDK_PATH }}"
-        curl -L "https://github.com{{ env.WASI_SDK_VERSION }}/wasi-sdk-${{ env.WASI_SDK_VERSION }}.0-x86_64-linux.tar.gz" | tar -xzf - --strip-components=1 -C "${{ env.WASI_SDK_PATH }}"
+        curl -L "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${{ env.WASI_SDK_VERSION }}/wasi-sdk-${{ env.WASI_SDK_VERSION }}.0-x86_64-linux.tar.gz" | tar -xzf - --strip-components=1 -C "${{ env.WASI_SDK_PATH }}"
 
     - name: Setup WebAssembly Wasi-SDK (macOS)
       if: matrix.os == 'macos-14'
       run: |
         mkdir -p "${{ env.WASI_SDK_PATH }}"
-        curl -L "https://github.com{{ env.WASI_SDK_VERSION }}/wasi-sdk-${{ env.WASI_SDK_VERSION }}.0-macos.tar.gz" | tar -xzf - --strip-components=1 -C "${{ env.WASI_SDK_PATH }}"
+        curl -L "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${{ env.WASI_SDK_VERSION }}/wasi-sdk-${{ env.WASI_SDK_VERSION }}.0-macos.tar.gz" | tar -xzf - --strip-components=1 -C "${{ env.WASI_SDK_PATH }}"
 
     - name: Step 1a: Configure Host Tools (Linux)
       if: matrix.os == 'ubuntu-24.04'
-      run: cmake -G Ninja -S . -B build-host -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+      run: |
+        cmake -G Ninja -S . -B build-host -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
 
     - name: Step 1b: Compile Host Tools (Linux)
       if: matrix.os == 'ubuntu-24.04'
-      run: cmake --build build-host --target hermesc --target hermes --target shermes --target shermes_console_a --target shermes_console --target hermesvmlean_a --parallel 4
+      run: |
+        cmake --build build-host --target hermesc --target hermes --target shermes --target shermes_console_a --target shermes_console --target hermesvmlean_a --parallel 4
 
     - name: Step 1c: Configure Host Tools (macOS)
       if: matrix.os == 'macos-14'
-      run: cmake -G Ninja -S . -B build-host -DCMAKE_BUILD_TYPE=Release -DICU_ROOT=$ICU_ROOT -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+      run: |
+        cmake -G Ninja -S . -B build-host -DCMAKE_BUILD_TYPE=Release -DICU_ROOT=$ICU_ROOT -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
 
     - name: Step 1d: Compile Host Tools (macOS)
       if: matrix.os == 'macos-14'
-      run: cmake --build build-host --target hermesc --target hermes --target shermes --target shermes_console_a --target shermes_console --target hermesvmlean_a --parallel 4
+      run: |
+        cmake --build build-host --target hermesc --target hermes --target shermes --target shermes_console_a --target shermes_console --target hermesvmlean_a --parallel 4
 
     - name: Step 2a: Configure WebAssembly Libraries
-      run: cmake -G Ninja -S . -B build-wasm -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_TOOLCHAIN_FILE="${{ env.WASI_SDK_PATH }}/share/cmake/wasi-sdk.cmake" -DWASI_SDK_PREFIX="${{ env.WASI_SDK_PATH }}" -DIMPORT_HOST_COMPILERS=build-host/ImportHostCompilers.cmake -DHERMES_UNICODE_LITE=ON -DLLVM_ENABLE_THREADS=0 -DHERMES_ALLOW_BOOST_CONTEXT=0 -DHERMES_CHECK_NATIVE_STACK=OFF
+      run: |
+        cmake -G Ninja -S . -B build-wasm -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_TOOLCHAIN_FILE="${{ env.WASI_SDK_PATH }}/share/cmake/wasi-sdk.cmake" -DWASI_SDK_PREFIX="${{ env.WASI_SDK_PATH }}" -DIMPORT_HOST_COMPILERS=build-host/ImportHostCompilers.cmake -DHERMES_UNICODE_LITE=ON -DLLVM_ENABLE_THREADS=0 -DHERMES_ALLOW_BOOST_CONTEXT=0 -DHERMES_CHECK_NATIVE_STACK=OFF
 
     - name: Step 2b: Compile WebAssembly Libraries
-      run: cmake --build build-wasm --target sh-demo --parallel 4
+      run: |
+        cmake --build build-wasm --target sh-demo --parallel 4
 
     - name: Step 3a: Bundle Workspace (Linux Package)
       if: matrix.os == 'ubuntu-24.04'
