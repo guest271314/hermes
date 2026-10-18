@@ -19,13 +19,17 @@ jobs:
           - os: ubuntu-24.04
             os-name: linux-x86_64
             artifact-ext: zip
-          - os: macos-14 # Apple Silicon (M1/M2/M3)
+          - os: macos-14
             os-name: macos-arm64
             artifact-ext: tar.gz
 
     env:
       WASI_SDK_VERSION: "25.0"
       WASI_SDK_PATH: ${{ github.workspace }}/wasi-sdk-25
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
     - name: Checkout Repository
@@ -52,14 +56,14 @@ jobs:
     - name: Setup WebAssembly Wasi-SDK (Linux)
       if: matrix.os == 'ubuntu-24.04'
       run: |
-        mkdir -p ${{ env.WASI_SDK_PATH }}
-        curl -L "https://github.com{{ env.WASI_SDK_VERSION }}-x86_64-linux.tar.gz" | tar -xzf - --strip-components=1 -C ${{ env.WASI_SDK_PATH }}
+        mkdir -p "${{ env.WASI_SDK_PATH }}"
+        curl -L "https://github.com{{ env.WASI_SDK_VERSION }}-x86_64-linux.tar.gz" | tar -xzf - --strip-components=1 -C "${{ env.WASI_SDK_PATH }}"
 
     - name: Setup WebAssembly Wasi-SDK (macOS)
       if: matrix.os == 'macos-14'
       run: |
-        mkdir -p ${{ env.WASI_SDK_PATH }}
-        curl -L "https://github.com{{ env.WASI_SDK_VERSION }}-macos.tar.gz" | tar -xzf - --strip-components=1 -C ${{ env.WASI_SDK_PATH }}
+        mkdir -p "${{ env.WASI_SDK_PATH }}"
+        curl -L "https://github.com{{ env.WASI_SDK_VERSION }}-macos.tar.gz" | tar -xzf - --strip-components=1 -C "${{ env.WASI_SDK_PATH }}"
 
     - name: Step 1: Configure and Build Host Tools
       run: |
@@ -81,7 +85,7 @@ jobs:
       run: |
         cmake -G Ninja -S . -B build-wasm \
           -DCMAKE_BUILD_TYPE=MinSizeRel \
-          -DCMAKE_TOOLCHAIN_FILE=${{ env.WASI_SDK_PATH }}/share/cmake/wasi-sdk.cmake \
+          -DCMAKE_TOOLCHAIN_FILE="${{ env.WASI_SDK_PATH }}/share/cmake/wasi-sdk.cmake" \
           -DIMPORT_HOST_COMPILERS=build-host/ImportHostCompilers.cmake \
           -DHERMES_UNICODE_LITE=ON \
           -DLLVM_ENABLE_THREADS=0 \
@@ -93,31 +97,37 @@ jobs:
     - name: Step 3: Bundle and Structure the SDK Workspace
       run: |
         SDK_DIR="hermes-wasm-sdk-${{ matrix.os-name }}"
-        mkdir -p $SDK_DIR/bin
-        mkdir -p $SDK_DIR/lib
-        mkdir -p $SDK_DIR/include
-        mkdir -p $SDK_DIR/obj
+        mkdir -p "$SDK_DIR/bin"
+        mkdir -p "$SDK_DIR/lib"
+        mkdir -p "$SDK_DIR/include"
+        mkdir -p "$SDK_DIR/obj"
 
-        # 1. Provide host compiler binary
-        cp build-host/bin/shermes $SDK_DIR/bin/
+        cp build-host/bin/shermes "$SDK_DIR/bin/"
+        cp build-wasm/lib/libshermes_console_a.a "$SDK_DIR/lib/"
+        cp build-wasm/lib/libhermesvmlean_a.a "$SDK_DIR/lib/"
+        cp build-wasm/jsi/libjsi.a "$SDK_DIR/lib/"
+        cp build-wasm/tools/sh-demo/CMakeFiles/sh-demo.dir/cxa.cpp.obj "$SDK_DIR/obj/"
+        cp build-wasm/lib/config/libhermesvm-config.h "$SDK_DIR/include/"
+        cp -r include/hermes "$SDK_DIR/include/"
 
-        # 2. Provide the pre-compiled WASM linking libraries
-        cp build-wasm/lib/libshermes_console_a.a $SDK_DIR/lib/
-        cp build-wasm/lib/libhermesvmlean_a.a $SDK_DIR/lib/
-        cp build-wasm/jsi/libjsi.a $SDK_DIR/lib/
+        echo "Static Hermes WebAssembly SDK" >> "$SDK_DIR/README.txt"
+        echo "=============================" >> "$SDK_DIR/README.txt"
+        echo "" >> "$SDK_DIR/README.txt"
+        echo "How to compile your JavaScript/TypeScript files to standalone WASM using this package:" >> "$SDK_DIR/README.txt"
+        echo "" >> "$SDK_DIR/README.txt"
+        echo "1. Transpile your input source file into Native C:" >> "$SDK_DIR/README.txt"
+        echo "   ./bin/shermes -v -Os -g -fauto-detect-static-builtins -typed -Xenable-tdz -emit-c nm_shermes.ts -o nm_shermes.c" >> "$SDK_DIR/README.txt"
+        echo "" >> "$SDK_DIR/README.txt"
+        echo "2. Compile the C code using your local wasi-clang toolchain (Ensure WasiSdk environment variable is set):" >> "$SDK_DIR/README.txt"
+        echo "   \"\${WasiSdk}\"/bin/clang nm_shermes.c -c -O3 -DNDEBUG -fno-strict-aliasing -fno-strict-overflow -I. -I./include -mllvm -wasm-enable-sjlj -Wno-c23-extensions -o nm_shermes.o" >> "$SDK_DIR/README.txt"
+        echo "" >> "$SDK_DIR/README.txt"
+        echo "3. Link the object code into your final standalone .wasm executable module matching your exact arguments:" >> "$SDK_DIR/README.txt"
+        echo "   \"\${WasiSdk}\"/bin/clang++ -O3 nm_shermes.o ./obj/cxa.cpp.obj -o nm_shermes.wasm -L./lib -lshermes_console_a -lhermesvmlean_a -ljsi -lwasi-emulated-mman -lsetjmp" >> "$SDK_DIR/README.txt"
 
-        # 3. Provide cxa.cpp translation unit dependency object
-        cp build-wasm/tools/sh-demo/CMakeFiles/sh-demo.dir/cxa.cpp.obj $SDK_DIR/obj/
-
-        # 4. Provide generated environment configs and source includes
-        cp build-wasm/lib/config/libhermesvm-config.h $SDK_DIR/include/
-        cp -r include/hermes $SDK_DIR/include/
-
-        # Compress archive cleanly by target type
         if [ "${{ matrix.artifact-ext }}" = "zip" ]; then
-          zip -r $SDK_DIR.zip $SDK_DIR/
+          zip -r "$SDK_DIR.zip" "$SDK_DIR/"
         else
-          tar -czf $SDK_DIR.tar.gz $SDK_DIR/
+          tar -czf "$SDK_DIR.tar.gz" "$SDK_DIR/"
         fi
 
     - name: Upload SDK Archive Release Bundle
