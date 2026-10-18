@@ -125,10 +125,10 @@ jobs:
         echo "   ./bin/shermes -v -Os -g -fauto-detect-static-builtins -typed -Xenable-tdz -emit-c nm_shermes.ts -o nm_shermes.c" >> "$SDK_DIR/README.txt"
         echo "" >> "$SDK_DIR/README.txt"
         echo "2. Compile the C code using your local wasi-clang toolchain (Ensure WasiSdk environment variable is set):" >> "$SDK_DIR/README.txt"
-        echo "   \"\${WasiSdk}\"/bin/clang nm_shermes.c -c -O3 -DNDEBUG -fno-strict-aliasing -fno-strict-overflow -I. -I./include -mllvm -wasm-enable-sjlj -Wno-c23-extensions -o nm_shermes.o" >> "$SDK_DIR/README.txt"
+        echo "   \$WasiSdk/bin/clang nm_shermes.c -c -O3 -DNDEBUG -fno-strict-aliasing -fno-strict-overflow -I. -I./include -mllvm -wasm-enable-sjlj -Wno-c23-extensions -o nm_shermes.o" >> "$SDK_DIR/README.txt"
         echo "" >> "$SDK_DIR/README.txt"
         echo "3. Link the object code into your final standalone .wasm executable module matching your exact arguments:" >> "$SDK_DIR/README.txt"
-        echo "   \"\${WasiSdk}\"/bin/clang++ -O3 nm_shermes.o ./obj/cxa.cpp.obj -o nm_shermes.wasm -L./lib -lshermes_console_a -lhermesvmlean_a -ljsi -lwasi-emulated-mman -lsetjmp" >> "$SDK_DIR/README.txt"
+        echo "   \$WasiSdk/bin/clang++ -O3 nm_shermes.o ./obj/cxa.cpp.obj -o nm_shermes.wasm -L./lib -lshermes_console_a -lhermesvmlean_a -ljsi -lwasi-emulated-mman -lsetjmp" >> "$SDK_DIR/README.txt"
 
         zip -r "$SDK_DIR.zip" "$SDK_DIR/"
 
@@ -155,10 +155,10 @@ jobs:
         echo "   ./bin/shermes -v -Os -g -fauto-detect-static-builtins -typed -Xenable-tdz -emit-c nm_shermes.ts -o nm_shermes.c" >> "$SDK_DIR/README.txt"
         echo "" >> "$SDK_DIR/README.txt"
         echo "2. Compile the C code using your local wasi-clang toolchain (Ensure WasiSdk environment variable is set):" >> "$SDK_DIR/README.txt"
-        echo "   \"\${WasiSdk}\"/bin/clang nm_shermes.c -c -O3 -DNDEBUG -fno-strict-aliasing -fno-strict-overflow -I. -I./include -mllvm -wasm-enable-sjlj -Wno-c23-extensions -o nm_shermes.o" >> "$SDK_DIR/README.txt"
+        echo "   \$WasiSdk/bin/clang nm_shermes.c -c -O3 -DNDEBUG -fno-strict-aliasing -fno-strict-overflow -I. -I./include -mllvm -wasm-enable-sjlj -Wno-c23-extensions -o nm_shermes.o" >> "$SDK_DIR/README.txt"
         echo "" >> "$SDK_DIR/README.txt"
         echo "3. Link the object code into your final standalone .wasm executable module matching your exact arguments:" >> "$SDK_DIR/README.txt"
-        echo "   \"\${WasiSdk}\"/bin/clang++ -O3 nm_shermes.o ./obj/cxa.cpp.obj -o nm_shermes.wasm -L./lib -lshermes_console_a -lhermesvmlean_a -ljsi -lwasi-emulated-mman -lsetjmp" >> "$SDK_DIR/README.txt"
+        echo "   \$WasiSdk/bin/clang++ -O3 nm_shermes.o ./obj/cxa.cpp.obj -o nm_shermes.wasm -L./lib -lshermes_console_a -lhermesvmlean_a -ljsi -lwasi-emulated-mman -lsetjmp" >> "$SDK_DIR/README.txt"
 
         tar -czf "$SDK_DIR.tar.gz" "$SDK_DIR/"
 
