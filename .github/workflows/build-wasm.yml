@@ -66,12 +66,12 @@ jobs:
         curl -L "https://github.com{{ env.WASI_SDK_VERSION }}-macos.tar.gz" | tar -xzf - --strip-components=1 -C "${{ env.WASI_SDK_PATH }}"
 
     - name: Step 1: Configure and Build Host Tools
+      env:
+        ACTIVE_OS: ${{ matrix.os }}
       run: |
-        EXTRA_CMAKE_FLAGS=""
-        if [ "${{ matrix.os }}" = "macos-14" ]; then
-          EXTRA_CMAKE_FLAGS="-DICU_ROOT=${{ env.ICU_ROOT }} -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++"
-        else
-          EXTRA_CMAKE_FLAGS="-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++"
+        EXTRA_CMAKE_FLAGS="-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++"
+        if [ "$ACTIVE_OS" = "macos-14" ]; then
+          EXTRA_CMAKE_FLAGS="-DICU_ROOT=$ICU_ROOT -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++"
         fi
 
         cmake -G Ninja -S . -B build-host \
@@ -95,6 +95,8 @@ jobs:
         cmake --build build-wasm --target sh-demo --parallel 4
 
     - name: Step 3: Bundle and Structure the SDK Workspace
+      env:
+        ARTIFACT_FORMAT: ${{ matrix.artifact-ext }}
       run: |
         SDK_DIR="hermes-wasm-sdk-${{ matrix.os-name }}"
         mkdir -p "$SDK_DIR/bin"
@@ -124,7 +126,7 @@ jobs:
         echo "3. Link the object code into your final standalone .wasm executable module matching your exact arguments:" >> "$SDK_DIR/README.txt"
         echo "   \"\${WasiSdk}\"/bin/clang++ -O3 nm_shermes.o ./obj/cxa.cpp.obj -o nm_shermes.wasm -L./lib -lshermes_console_a -lhermesvmlean_a -ljsi -lwasi-emulated-mman -lsetjmp" >> "$SDK_DIR/README.txt"
 
-        if [ "${{ matrix.artifact-ext }}" = "zip" ]; then
+        if [ "$ARTIFACT_FORMAT" = "zip" ]; then
           zip -r "$SDK_DIR.zip" "$SDK_DIR/"
         else
           tar -czf "$SDK_DIR.tar.gz" "$SDK_DIR/"
