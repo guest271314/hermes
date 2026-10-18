@@ -86,6 +86,7 @@ jobs:
         cmake -G Ninja -S . -B build-wasm \
           -DCMAKE_BUILD_TYPE=MinSizeRel \
           -DCMAKE_TOOLCHAIN_FILE="${{ env.WASI_SDK_PATH }}/share/cmake/wasi-sdk.cmake" \
+          -DWASI_SDK_PREFIX="${{ env.WASI_SDK_PATH }}" \
           -DIMPORT_HOST_COMPILERS=build-host/ImportHostCompilers.cmake \
           -DHERMES_UNICODE_LITE=ON \
           -DLLVM_ENABLE_THREADS=0 \
