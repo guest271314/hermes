@@ -1,3 +1,6 @@
+permissions:
+  contents: write
+
 name: Package Multi-Platform Hermes WASM SDK
 
 on:
@@ -230,3 +233,13 @@ jobs:
           build-host/CMakeFiles/CMakeError.log
           build-host/CMakeFiles/CMakeOutput.log
         if-no-files-found: ignore
+
+    - name: Publish to rolling release
+      if: github.event_name != 'pull_request'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: sdk-latest
+        name: Static Hermes WASM SDK (latest build)
+        prerelease: true
+        files: ${{ env.SDK_DIR }}.tar.gz
+        fail_on_unmatched_files: true
