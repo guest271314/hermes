@@ -64,28 +64,40 @@ jobs:
 
     - name: Configure Host Tools
       run: |
+        set +e
         cmake -G Ninja -S . -B build-host \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_C_COMPILER=clang \
           -DCMAKE_CXX_COMPILER=clang++ \
           -DHERMES_ENABLE_INTL=OFF \
           -DHERMES_UNICODE_LITE=ON \
-          -DPython3_EXECUTABLE="$(which python3)"
+          -DPython3_EXECUTABLE="$(which python3)" \
+          --log-level=VERBOSE 2>&1 | tee configure.log
+        rc=${PIPESTATUS[0]}
+        if [ $rc -ne 0 ]; then
+          echo "::group::FULL configure.log"
+          cat configure.log
+          echo "::endgroup::"
+          echo "=== lines that are not plain status lines ==="
+          grep -nvE '^(-- |$)' configure.log | tail -n 60
+        fi
+        exit $rc
 
     - name: Compile Host Tools
       run: |
         cmake --build build-host --target hermesc --target hermes --target shermes --target shermes_console_a --target shermes_console --target hermesvmlean_a --parallel 4
 
-    - name: Verify shermes has no ICU dependency
+    - name: Verify shermes has no bundled ICU dependency
       run: |
         if [ "$RUNNER_OS" = "Linux" ]; then
           LIBS=$(ldd build-host/bin/shermes)
         else
-          LIBS=$(otool -L build-host/bin/shermes)
+          # libicucore is Apple's system ICU, present on every Mac
+          LIBS=$(otool -L build-host/bin/shermes | grep -v libicucore || true)
         fi
         echo "$LIBS"
         if echo "$LIBS" | grep -qi icu; then
-          echo "ERROR: shermes still links ICU"
+          echo "ERROR: shermes still links a bundled ICU"
           exit 1
         fi
 
@@ -109,7 +121,6 @@ jobs:
       run: |
         mkdir -p "$SDK_DIR/bin" "$SDK_DIR/lib" "$SDK_DIR/include" "$SDK_DIR/obj"
 
-        # Copy a file found anywhere under a build dir; fail clearly if missing
         grab() {  # grab <build-dir> <filename> <dest-dir>
           f=$(find "$1" -name "$2" -type f | head -n 1)
           if [ -z "$f" ]; then
@@ -154,10 +165,14 @@ jobs:
         path: ${{ env.SDK_DIR }}.tar.gz
         if-no-files-found: error
 
-    - name: Show CMake logs on failure
+    - name: Upload debug logs on failure
       if: failure()
-      run: |
-        for f in build-host/CMakeFiles/CMakeConfigureLog.yaml build-host/CMakeFiles/CMakeError.log; do
-          if [ -f "$f" ]; then echo "===== $f ====="; tail -n 80 "$f"; fi
-        done
-        true
+      uses: actions/upload-artifact@v4
+      with:
+        name: debug-logs-${{ matrix.os-name }}
+        path: |
+          configure.log
+          build-host/CMakeFiles/CMakeConfigureLog.yaml
+          build-host/CMakeFiles/CMakeError.log
+          build-host/CMakeFiles/CMakeOutput.log
+        if-no-files-found: ignore
