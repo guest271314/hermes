@@ -113,26 +113,6 @@ jobs:
         cp build-wasm/lib/config/libhermesvm-config.h $SDK_DIR/include/
         cp -r include/hermes $SDK_DIR/include/
 
-        # 5. Output localized reproduction user documentation with clean left margins
-        cat << 'EOF' > $SDK_DIR/README.txt
-        Static Hermes WebAssembly SDK
-        =============================
-How to compile your JavaScript/TypeScript files to standalone WASM using this package:
-
-1. Transpile your input source file into Native C:
-   ./bin/shermes -v -Os -g -fauto-detect-static-builtins -typed -Xenable-tdz -emit-c nm_shermes.ts -o nm_shermes.c
-
-2. Compile the C code using your local wasi-clang toolchain (Ensure WasiSdk environment variable is set):
-   "${WasiSdk}"/bin/clang nm_shermes.c -c -O3 -DNDEBUG -fno-strict-aliasing -fno-strict-overflow -I. -I./include -mllvm -wasm-enable-sjlj -Wno-c23-extensions -o nm_shermes.o
-
-3. Link the object code into your final standalone .wasm executable module matching your exact arguments:
-   "${WasiSdk}"/bin/clang++ -O3 nm_shermes.o \
-     ./obj/cxa.cpp.obj \
-     -o nm_shermes.wasm \
-     -L./lib \
-     -lshermes_console_a -lhermesvmlean_a -ljsi -lwasi-emulated-mman -lsetjmp
-EOF
-
         # Compress archive cleanly by target type
         if [ "${{ matrix.artifact-ext }}" = "zip" ]; then
           zip -r $SDK_DIR.zip $SDK_DIR/
